@@ -181,7 +181,7 @@ int main() {
         for (int j = i + 1; j < kMicrophoneCount; ++j) {
           const float d2 = listen_dir.dotMul(microphones[j] - optical_camera_pos);
           const float td2 = d2 / kSpeedOfSound;
-          const int offset = (td2 - td1) * kSampleRateHz;
+          const int offset = roundf((td2 - td1) * kSampleRateHz);
           assert(abs(offset) < kCrossCorrelateElementsOfInterest);
           if (offset >= 0) {
             value += microphone_cross_correlation.at(i, j)[offset];
