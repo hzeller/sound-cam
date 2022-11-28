@@ -8,18 +8,23 @@
 #include "point.h"
 #include "terminal-canvas.h"
 
+// Random Microphone arrangement can reduce regular repeating artifacts
+//#define USE_RANDOM_MICROPHONE_ARRANGEMENT
+
 constexpr float tau = 2 * M_PI;
 constexpr float kSpeedOfSound = 340.0f; // m/s
 constexpr float kTestSourceFrequency = 1200.0; // baseline sound frequency.
 
 constexpr int screen_size = 100;
 
+constexpr float kMicrophoneRadius = 0.3;
+
 constexpr Point optical_camera_pos = {0, 0, 0};
 
 constexpr int kMicrophoneCount = 17;
 
 constexpr size_t kSampleRateHz = 48000;
-constexpr size_t kMicrophoneSamples = 1 << 8;
+constexpr size_t kMicrophoneSamples = 1 << 9;
 
 constexpr float display_range = tau / 4; // Angle of view. 90 degree.
 
@@ -29,13 +34,24 @@ typedef std::function<float(float t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
 
-std::vector<Point> CreateMicrophoneCircle(int count, float radius) {
-  std::vector<Point> microphones;
+// Various microphone arrangements.
+void AddMicrophoneCircle(std::vector<Point> *mics, int count, float radius) {
+  fprintf(stderr, "Circle microphone arrangement\n");
   for (int i = 0; i < count; ++i) {
     const float angle = tau / count * i;
-    microphones.push_back(Point{cos(angle) * radius, sin(angle) * radius, 0});
+    mics->push_back(Point{cos(angle) * radius, sin(angle) * radius, 0});
   }
-  return microphones;
+}
+
+void AddMicrophoneRandom(std::vector<Point> *mics, int count, float radius) {
+  fprintf(stderr, "Random microphone arrangement\n");
+  std::vector<Point> microphones;
+  srandom(time(NULL));
+  for (int i = 0; i < count; ++i) {
+    const float x = (random() % 2000 - 1000) / 1000.0 * radius;
+    const float y = (random() % 2000 - 1000) / 1000.0 * radius;
+    mics->push_back(Point{x, y, 0});
+  }
 }
 
 // Slightly different frequencies for the wave generating functions to be
@@ -54,7 +70,7 @@ static float wave3(float t) {
 
 static const std::pair<Point, WaveExpr> sound_sources[] = {
   {{-0.8, 1, 4}, wave1},
-  {{0, -1, 2}, wave2},
+  {{0, -8, 20}, wave2},
   {{1, 0, 2}, wave3},
 };
 
@@ -79,6 +95,7 @@ void VisualizeMicrophoneLocations(const std::vector<Point>& microphones) {
   }
 
   // Print microphones.
+  fprintf(stderr, "Microphone min=%.2f max=%.2f\n", fmin, fmax);
   TerminalCanvas canvas(screen_size, screen_size);
   for (const Point &m : microphones) {
     int x = int((screen_size - 1) * (m.x - fmin) / (fmax - fmin));
@@ -90,9 +107,14 @@ void VisualizeMicrophoneLocations(const std::vector<Point>& microphones) {
 
 int main() {
   // Maximum interesting correlation time difference needed in cross-correlation
-  const int kCrossCorrelateElementsOfInterest = 50;
-  
-  const auto microphones = CreateMicrophoneCircle(kMicrophoneCount, 0.3);
+  const int kCrossCorrelateElementsOfInterest = 75;
+
+  std::vector<Point> microphones;
+#ifdef USE_RANDOM_MICROPHONE_ARRANGEMENT
+  AddMicrophoneRandom(&microphones, kMicrophoneCount, kMicrophoneRadius);
+#else
+  AddMicrophoneCircle(&microphones, kMicrophoneCount, kMicrophoneRadius);
+#endif
   //VisualizeMicrophoneLocations(microphones);
   
   std::vector<MicrophoneRecording> microphone_recording;
@@ -130,6 +152,7 @@ int main() {
   // Sweep.
   const float range = std::tan(display_range / 2); // max x in one meter
   Buffer2D<float> frame_buffer(screen_size, screen_size);
+  int max_offset_used = 0;
   for (int x = 0; x < screen_size; ++x) {
     for (int y = 0; y < screen_size; ++y) {
       // From our place, determine the vector where we're looking at.
@@ -155,6 +178,7 @@ int main() {
           else {
             value += microphone_cross_correlation.at(j, i)[-offset];
           }
+          if (abs(offset) > max_offset_used) max_offset_used = abs(offset);
         }
       }
       // The way angles are calculated from right to left, but our
@@ -162,6 +186,8 @@ int main() {
       frame_buffer.at(screen_size - x - 1, y) = value;
     }
   }
+  fprintf(stderr, "Maximum cross-correlate output count used: %d\n",
+          max_offset_used);
 
   // Determine range for the coloring.
   float smallest = 1e9;

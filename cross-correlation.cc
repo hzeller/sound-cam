@@ -2,6 +2,9 @@
 #include <cstddef>
 #include <vector>
 
+#include "cross-correlation.h"
+
+// Very simplistic O(N²) implementation.
 std::vector<float> cross_correlate(const std::vector<float> &a,
                                    const std::vector<float> &b,
                                    size_t elements,
