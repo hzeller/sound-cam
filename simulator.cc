@@ -1,6 +1,7 @@
 
 #include <unistd.h>
 #include <functional>
+#include <random>
 
 #include "buffer-2d.h"
 #include "colormap.h"
@@ -34,6 +35,16 @@ typedef std::function<float(float t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
 
+static float sampling_noise() {
+  static std::random_device r_engine;
+  static std::default_random_engine r(r_engine());
+
+  // Additional noise to signal (which is in the range from -1 to 1).
+  static std::uniform_real_distribution<> distribution(-1, 1);
+
+  return distribution(r);
+}
+
 // Various microphone arrangements.
 void AddMicrophoneCircle(std::vector<Point> *mics, int count, float radius) {
   fprintf(stderr, "Circle microphone arrangement\n");
@@ -57,19 +68,19 @@ void AddMicrophoneRandom(std::vector<Point> *mics, int count, float radius) {
 // Slightly different frequencies for the wave generating functions to be
 // able to distinguish them easily.
 float wave1(float t) {
-  return 0.2 * sin(2 * kTestSourceFrequency * t * tau);
+  return sin(2 * kTestSourceFrequency * t * tau);
 };
 
 static float wave2(float t) {
-  return 0.2 * sin(2.1637 * kTestSourceFrequency * t * tau);
+  return sin(2.1637 * kTestSourceFrequency * t * tau);
 }
 
 static float wave3(float t) {
-  return 0.2 * sin(2.718 * kTestSourceFrequency * t * tau);
+  return sin(2.718 * kTestSourceFrequency * t * tau);
 }
 
 static const std::pair<Point, WaveExpr> sound_sources[] = {
-  {{-0.8, 1, 4}, wave1},
+  {{-0.8, 0.2, 4}, wave1},
   {{0, -8, 20}, wave2},
   {{1, 0, 2}, wave3},
 };
@@ -81,7 +92,7 @@ void add_recording(MicrophoneRecording *recording,
                    std::function<float(float t)> wave_f) {
   for (size_t i = 0; i < recording->size(); ++i) {
     const float t = phase_shift_seconds + 1.0f * i / sample_frequency_hz;
-    (*recording)[i] += wave_f(t);
+    (*recording)[i] += wave_f(t) + sampling_noise();
   }
 }
 
@@ -112,10 +123,10 @@ int main() {
   std::vector<Point> microphones;
 #ifdef USE_RANDOM_MICROPHONE_ARRANGEMENT
   AddMicrophoneRandom(&microphones, kMicrophoneCount, kMicrophoneRadius);
+  VisualizeMicrophoneLocations(microphones);
 #else
   AddMicrophoneCircle(&microphones, kMicrophoneCount, kMicrophoneRadius);
 #endif
-  //VisualizeMicrophoneLocations(microphones);
   
   std::vector<MicrophoneRecording> microphone_recording;
 
@@ -188,6 +199,14 @@ int main() {
   }
   fprintf(stderr, "Maximum cross-correlate output count used: %d\n",
           max_offset_used);
+
+  fprintf(stderr,
+          "\n%d mics; %.1f cm view in 1 meter; r=%.1fcm; f₀=%.0f; "
+          "λ=%.2f cm; %.3fms max offset\n",
+          kMicrophoneCount, range * 100, kMicrophoneRadius * 100,
+          kTestSourceFrequency,
+          kSpeedOfSound / kTestSourceFrequency * 100,
+          max_offset_used * 1000.0 / kSampleRateHz);
 
   // Determine range for the coloring.
   float smallest = 1e9;
