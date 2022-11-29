@@ -43,7 +43,10 @@
 
 static void reliable_write(int fd, const char *buf, size_t size) {
     int written;
-    while (size && (written = write(fd, buf, size)) > 0) {
+    while (size) {
+        written = write(fd, buf, size);
+        if (written == EINTR) continue;
+        if (written < 0) break;
         size -= written;
         buf += written;
     }
