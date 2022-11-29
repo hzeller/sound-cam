@@ -364,6 +364,7 @@ int main() {
   term_raw();
 
   TerminalCanvas canvas(frame_buffer.width(), frame_buffer.height());
+  canvas.CursorOff(STDOUT_FILENO);
 
   int move_source = 0;
   bool canvas_needs_jump_to_top = false;
@@ -412,4 +413,5 @@ int main() {
   }
   const auto duration_ms = GetTimeInMillis() - start_time;
   fprintf(stderr, "\n%.1ffps\n", 1000.0 * frame_count / duration_ms);
+  canvas.CursorOn(STDOUT_FILENO);
 }
