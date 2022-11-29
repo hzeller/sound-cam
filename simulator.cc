@@ -2,6 +2,9 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <termios.h>
+#include <sys/select.h>
+#include <fcntl.h>
 
 #include <functional>
 #include <random>
@@ -24,7 +27,7 @@ constexpr float kMicrophoneRadius = 0.3;
 constexpr Point optical_camera_pos = {0, 0, 0};
 
 constexpr int kScreenSize = 80; // Pixels we put on terminal screen.
-constexpr int kMicrophoneCountxx = 17;
+constexpr int kMicrophoneCount = 17;
 
 constexpr size_t kSampleRateHz = 48000;
 constexpr size_t kMicrophoneSamples = 1 << 9;
@@ -41,11 +44,6 @@ typedef std::vector<float> CrossCorrelation;
 typedef std::function<float(float t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
-
-volatile bool interrupt_received = false;
-static void InterruptHandler(int signo) {
-  interrupt_received = true;
-}
 
 typedef int64_t tmillis_t;
 static tmillis_t GetTimeInMillis() {
@@ -96,13 +94,13 @@ static float wave3(float t) {
   return sin(2.718 * kTestSourceFrequency * t * tau);
 }
 
-static const struct SoundSource {
+static struct SoundSource {
   Point loc;
   WaveExpr gen;
 } sound_sources[] = {
-    {{-0.8, 0.2, 4}, wave1},
-    {{0, -8, 20}, wave2},
-    {{1, 0, 2}, wave3},
+  {{0, 0,     1.4}, wave1},
+  {{-0.2, -0.3,    1.4}, wave2},
+  {{0.7, 0.3, 1.4}, wave3},
 };
 
 // Add a recording with the given phase shift and wave.
@@ -201,14 +199,18 @@ void PrecalculateCrossCorrelationMatrix(
 }
 
 void VisualizeSoundSourceLocations(float frame_width_meter,
+                                   int hightlight,
                                    TerminalCanvas *canvas) {
   // Some overlay where the sound sources are.
   for (const auto &s : sound_sources) {
     Point loc = s.loc;
     loc.MakeUnitLen();
-    canvas->SetPixel((loc.x / frame_width_meter + 0.5) * canvas->width(),
-                     ((0 - loc.y) / frame_width_meter + 0.5) * canvas->height(),
-                     255, 255, 255);
+    const int xpos = (loc.x / frame_width_meter + 0.5) * canvas->width();
+    const int ypos = (-loc.y / frame_width_meter + 0.5) * canvas->height();
+    if (hightlight-- == 0)
+      canvas->SetPixel(xpos, ypos, 255, 255, 255);
+    else
+      canvas->SetPixel(xpos, ypos, 127, 127, 127);
   }
 }
 
@@ -311,22 +313,64 @@ void ConstructSoundImage(
 #endif
 }
 
+static struct termios orig_term;
+void term_reset() {
+  fcntl(STDIN_FILENO, 0, FNDELAY);
+  tcsetattr(STDIN_FILENO, TCSANOW, &orig_term);
+}
+
+void term_raw() {
+  tcgetattr(STDIN_FILENO, &orig_term);
+  struct termios local;
+  local = orig_term;
+  local.c_lflag &= ~(ECHO | ICANON);
+  atexit(term_reset);
+  tcsetattr(STDIN_FILENO, TCSANOW, &local);
+}
+
+// Read char if available, otherwise 0.
+char maybe_readchar() {
+  struct timeval tv = {0, 0};  // No wait.
+  fd_set fds;
+  FD_ZERO(&fds);
+  FD_SET(STDIN_FILENO, &fds);
+  select(STDIN_FILENO+1, &fds, nullptr, nullptr, &tv);
+  if (!FD_ISSET(0, &fds))
+    return 0;
+  char c;
+  return read(STDIN_FILENO, &c, 1) <= 0 ? 0 : c;
+}
+
+void move_limited(float diff, float min, float max, float *target) {
+  float new_value = *target + diff;
+  if (new_value > min && new_value < max)
+    *target = new_value;
+}
+
 int main() {
-  const auto microphones = CreateMicrophoneLocations(kMicrophoneCountxx);
+  const auto microphones = CreateMicrophoneLocations(kMicrophoneCount);
   fprintf(stderr, "Got %d microphones\n", (int)microphones.size());
 
   Buffer2D<CrossCorrelation> cross_correlations(microphones.size(),
                                                 microphones.size());
 
   Buffer2D<float> frame_buffer(kScreenSize, kScreenSize);
+
+  printf("\n"
+         "Highlighted source movable     |   K         |\n");
+  printf("1, 2, 3: choose source to move | H   L  Move |"
+         " <ESC>: exit\n");
+  printf("                               |   J         |\n");
+  term_raw();
+
   TerminalCanvas canvas(frame_buffer.width(), frame_buffer.height());
 
-  signal(SIGINT, InterruptHandler);
-
+  int move_source = 0;
   bool canvas_needs_jump_to_top = false;
   size_t frame_count = 0;
+  bool finished = false;
   const auto start_time = GetTimeInMillis();
-  while (!interrupt_received) {
+  while (!finished) {
     // Simulate recording, including noise.
     auto microphone_recordings = SimulateRecording(microphones);
 
@@ -339,11 +383,32 @@ int main() {
                         cross_correlations, &frame_buffer);
 
     VisualizeBuffer(frame_buffer, &canvas);
-    VisualizeSoundSourceLocations(range, &canvas);
+    VisualizeSoundSourceLocations(range, move_source, &canvas);
 
     canvas.Send(STDOUT_FILENO, canvas_needs_jump_to_top);
     canvas_needs_jump_to_top = true;
     ++frame_count;
+
+    switch (maybe_readchar()) {
+    case '\033':
+      finished = true;
+      break;
+    case '1': move_source = 0; break;
+    case '2': move_source = 1; break;
+    case '3': move_source = 2; break;
+    case 'h': case 'H':
+      move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.x);
+      break;
+    case 'j': case 'J':
+      move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.y);
+      break;
+    case 'l': case 'L':
+      move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.x);
+      break;
+    case 'k': case 'K':
+      move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.y);
+      break;
+    }
   }
   const auto duration_ms = GetTimeInMillis() - start_time;
   fprintf(stderr, "\n%.1ffps\n", 1000.0 * frame_count / duration_ms);
