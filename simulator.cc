@@ -29,7 +29,8 @@ constexpr int kMicrophoneCountxx = 17;
 constexpr size_t kSampleRateHz = 48000;
 constexpr size_t kMicrophoneSamples = 1 << 9;
 
-// Maximum interesting correlation time difference needed in cross-correlation
+// Maximum interesting correlation time difference needed in
+// cross-correlation.
 // We should either do that on-demand or calculate an upper bound.
 const int kCrossCorrelateElementsOfInterest = 75;
 
