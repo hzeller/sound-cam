@@ -36,6 +36,7 @@ constexpr size_t kMicrophoneSamples = 1 << 9;
 // Maximum interesting correlation time difference needed in
 // cross-correlation.
 // We should either do that on-demand or calculate an upper bound.
+// (once cross-correlation is implemented with fft, not needed anymore)
 const int kCrossCorrelateElementsOfInterest = 75;
 
 constexpr float display_range = tau / 4; // Angle of view. 90 degree.
@@ -65,7 +66,8 @@ static float sampling_noise() {
 
 // Various microphone arrangements.
 void AddMicrophoneCircle(std::vector<Point> *mics, int count, float radius) {
-  fprintf(stderr, "Circle microphone arrangement\n");
+  fprintf(stderr, "Circle microphone arrangement, radius %.2fm; %d mics\n",
+          radius, count);
   for (int i = 0; i < count; ++i) {
     const float angle = tau / count * i;
     mics->push_back(Point{cos(angle) * radius, sin(angle) * radius, 0});
@@ -84,7 +86,7 @@ void AddMicrophoneRandom(std::vector<Point> *mics, int count, float radius) {
 }
 
 // Slightly different frequencies for the wave generating functions to be
-// able to distinguish them easily.
+// able to distinguish them easily and not creating cross talk.
 float wave1(float t) { return sin(2 * kTestSourceFrequency * t * tau); };
 
 static float wave2(float t) {
@@ -95,13 +97,15 @@ static float wave3(float t) {
   return sin(2.718 * kTestSourceFrequency * t * tau);
 }
 
+// Initial placement of sound sources, but read/write as we allow to
+// edit them.
 static struct SoundSource {
   Point loc;
   WaveExpr gen;
 } sound_sources[] = {
-  {{0, 0,     1.4}, wave1},
-  {{-0.2, -0.3,    1.4}, wave2},
-  {{0.7, 0.3, 1.4}, wave3},
+  {{0,       0, 1.4}, wave1},
+  {{-0.2, -0.3, 1.4}, wave2},
+  {{0.7,   0.3, 1.4}, wave3},
 };
 
 // Add a recording with the given phase shift and wave.
@@ -142,15 +146,15 @@ std::vector<Point> CreateMicrophoneLocations(int count) {
   std::vector<Point> result;
 #ifdef USE_RANDOM_MICROPHONE_ARRANGEMENT
   AddMicrophoneRandom(&result, count, kMicrophoneRadius);
-  VisualizeMicrophoneLocations(result);
 #else
 #if 1
   AddMicrophoneCircle(&result, count, kMicrophoneRadius);
 #else
-  // Adding random microphones in addition to the circle helps reduces some
-  // repetetive artifacts.
-  AddMicrophoneRandom(&result, count/2, kMicrophoneRadius);
-  AddMicrophoneCircle(&result, count - count/2, kMicrophoneRadius);
+  std::initializer_list<float> radiuses = {0.5, 1.0, 1.3};
+  float sum = std::accumulate(radiuses.begin(), radiuses.end(), 0);
+  for (const float radius : radiuses) {
+    AddMicrophoneCircle(&result, count * radius / sum, radius * kMicrophoneRadius);
+  }
 #endif
 #endif
   return result;
@@ -358,7 +362,8 @@ int main() {
   Buffer2D<float> frame_buffer(kScreenSize, kScreenSize);
 
   printf("\n"
-         "Highlighted source movable     |   K         |\n");
+         "Highlighted source movable     |   K         |"
+         "  m   : show microphones\n");
   printf("1, 2, 3: choose source to move | H   L  Move |"
          " <ESC>: exit\n");
   printf("                               |   J         |\n");
@@ -409,6 +414,10 @@ int main() {
       break;
     case 'k': case 'K':
       move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.y);
+      break;
+    case 'm':
+      VisualizeMicrophoneLocations(microphones);
+      canvas_needs_jump_to_top = false;
       break;
     }
   }

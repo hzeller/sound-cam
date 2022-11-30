@@ -8,5 +8,6 @@ pkgs.mkShell {
     [
       gnumake
       clang-tools
+      linuxKernel.packages.linux_5_15.perf  # performance tests
     ];
 }

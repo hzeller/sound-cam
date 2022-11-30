@@ -6,8 +6,7 @@
 template <class T> class Buffer2D {
 public:
   Buffer2D(int w, int h)
-    : width_(w), height_(h), buffer_(new T[width_ * height_]) {
-  }
+      : width_(w), height_(h), buffer_(new T[width_ * height_]) {}
   ~Buffer2D() { delete[] buffer_; }
 
   T &at(int x, int y) {
