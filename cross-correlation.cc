@@ -184,7 +184,7 @@ std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
   const auto convolved = FastConvolve(a, b_reversed);
   // The (0, 0) window element starts at 256.
   for (int i = 0; i < output_count; ++i) {
-    result[i] = convolved[256 + i];
+    result[i] = convolved[a.size()/2 + i];
   }
   return result;
 }
