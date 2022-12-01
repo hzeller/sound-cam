@@ -367,7 +367,7 @@ int main() {
   printf("1, 2, 3: choose source to move | H   L  Move |"
          " <ESC>: exit\n");
   printf("                               |   J         |"
-         "    o : suspend output\n");
+         "    o : switch output\n");
   term_raw();
 
   TerminalCanvas canvas(frame_buffer.width(), frame_buffer.height());
