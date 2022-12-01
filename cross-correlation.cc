@@ -4,19 +4,24 @@
 
 #include "cross-correlation.h"
 
+#include <alglib/fasttransforms.h>
+
+#define MANUAL_IMPL 1
+
 // Very simplistic O(N²) implementation.
-std::vector<float> cross_correlate(const std::vector<float> &a,
-                                   const std::vector<float> &b,
-                                   size_t elements,
-                                   int output_count) {
+#if MANUAL_IMPL
+std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
+                                    const std::vector<real_t> &b,
+                                    size_t elements,
+                                    int output_count) {
   if (output_count < 0) output_count = elements;
-  
+
   assert(output_count <= (int)elements);
   assert(a.size() >= elements + output_count);
   assert(b.size() >= elements);
 
-  std::vector<float> result(output_count);
-  
+  std::vector<real_t> result(output_count);
+
   for (int i = 0; i < output_count; ++i) {
     for (size_t j = 0; j < elements; ++j) {
       result[i] += a[j + i] * b[j];
@@ -24,3 +29,23 @@ std::vector<float> cross_correlate(const std::vector<float> &a,
   }
   return result;
 }
+#else
+std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
+                                    const std::vector<real_t> &b,
+                                    size_t elements,
+                                    int output_count) {
+  if (output_count < 0) output_count = elements;
+
+  alglib::real_1d_array out;
+  alglib::real_1d_array signal, pattern;
+  signal.attach_to_ptr(a.size(), (real_t*)a.data());
+  pattern.attach_to_ptr(b.size(), (real_t*)b.data());
+
+  alglib::corrr1d(signal, signal.length(), pattern, elements, out);
+
+  std::vector<real_t> result(output_count);
+  std::copy(out.getcontent(), out.getcontent() + output_count,
+            result.begin());
+  return result;
+}
+#endif

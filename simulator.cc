@@ -19,11 +19,11 @@
 // Random Microphone arrangement can reduce regular repeating artifacts
 //#define USE_RANDOM_MICROPHONE_ARRANGEMENT
 
-constexpr float tau = 2 * M_PI;
-constexpr float kSpeedOfSound = 340.0f;        // m/s
-constexpr float kTestSourceFrequency = 1200.0; // baseline sound frequency.
+constexpr real_t tau = 2 * M_PI;
+constexpr real_t kSpeedOfSound = 340.0f;        // m/s
+constexpr real_t kTestSourceFrequency = 1200.0; // baseline sound frequency.
 
-constexpr float kMicrophoneRadius = 0.3;
+constexpr real_t kMicrophoneRadius = 0.3;
 
 constexpr Point optical_camera_pos = {0, 0, 0};
 
@@ -39,11 +39,11 @@ constexpr size_t kMicrophoneSamples = 1 << 9;
 // (once cross-correlation is implemented with fft, not needed anymore)
 const int kCrossCorrelateElementsOfInterest = 75;
 
-constexpr float display_range = tau / 4; // Angle of view. 90 degree.
+constexpr real_t display_range = tau / 4; // Angle of view. 90 degree.
 
-typedef std::vector<float> MicrophoneRecording;
-typedef std::vector<float> CrossCorrelation;
-typedef std::function<float(float t)> WaveExpr;
+typedef std::vector<real_t> MicrophoneRecording;
+typedef std::vector<real_t> CrossCorrelation;
+typedef std::function<real_t(real_t t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
 
@@ -54,7 +54,7 @@ static tmillis_t GetTimeInMillis() {
   return tp.tv_sec * 1000 + tp.tv_usec / 1000;
 }
 
-static float sampling_noise() {
+static real_t sampling_noise() {
   static std::random_device r_engine;
   static std::default_random_engine r(r_engine());
 
@@ -65,35 +65,35 @@ static float sampling_noise() {
 }
 
 // Various microphone arrangements.
-void AddMicrophoneCircle(std::vector<Point> *mics, int count, float radius) {
+void AddMicrophoneCircle(std::vector<Point> *mics, int count, real_t radius) {
   fprintf(stderr, "Circle microphone arrangement, radius %.2fm; %d mics\n",
           radius, count);
   for (int i = 0; i < count; ++i) {
-    const float angle = tau / count * i;
+    const real_t angle = tau / count * i;
     mics->push_back(Point{cos(angle) * radius, sin(angle) * radius, 0});
   }
 }
 
-void AddMicrophoneRandom(std::vector<Point> *mics, int count, float radius) {
+void AddMicrophoneRandom(std::vector<Point> *mics, int count, real_t radius) {
   fprintf(stderr, "Random microphone arrangement\n");
   std::vector<Point> microphones;
   srandom(time(NULL));
   for (int i = 0; i < count; ++i) {
-    const float x = (random() % 2000 - 1000) / 1000.0 * radius;
-    const float y = (random() % 2000 - 1000) / 1000.0 * radius;
+    const real_t x = (random() % 2000 - 1000) / 1000.0 * radius;
+    const real_t y = (random() % 2000 - 1000) / 1000.0 * radius;
     mics->push_back(Point{x, y, 0});
   }
 }
 
 // Slightly different frequencies for the wave generating functions to be
 // able to distinguish them easily and not creating cross talk.
-float wave1(float t) { return sin(2 * kTestSourceFrequency * t * tau); };
+real_t wave1(real_t t) { return sin(2 * kTestSourceFrequency * t * tau); };
 
-static float wave2(float t) {
+static real_t wave2(real_t t) {
   return sin(2.1637 * kTestSourceFrequency * t * tau);
 }
 
-static float wave3(float t) {
+static real_t wave3(real_t t) {
   return sin(2.718 * kTestSourceFrequency * t * tau);
 }
 
@@ -110,16 +110,16 @@ static struct SoundSource {
 
 // Add a recording with the given phase shift and wave.
 void add_recording(MicrophoneRecording *recording, int sample_frequency_hz,
-                   float phase_shift_seconds,
-                   std::function<float(float t)> wave_f) {
+                   real_t phase_shift_seconds,
+                   std::function<real_t(real_t t)> wave_f) {
   for (size_t i = 0; i < recording->size(); ++i) {
-    const float t = phase_shift_seconds + 1.0f * i / sample_frequency_hz;
+    const real_t t = phase_shift_seconds + 1.0f * i / sample_frequency_hz;
     (*recording)[i] += wave_f(t) + sampling_noise();
   }
 }
 
 void VisualizeMicrophoneLocations(const std::vector<Point> &microphones) {
-  float fmin = 0, fmax = 0;
+  real_t fmin = 0, fmax = 0;
   for (const Point &micro_pos : microphones) {
     if (micro_pos.x < fmin)
       fmin = micro_pos.x;
@@ -150,9 +150,9 @@ std::vector<Point> CreateMicrophoneLocations(int count) {
 #if 1
   AddMicrophoneCircle(&result, count, kMicrophoneRadius);
 #else
-  std::initializer_list<float> radiuses = {0.5, 1.0, 1.3};
-  float sum = std::accumulate(radiuses.begin(), radiuses.end(), 0);
-  for (const float radius : radiuses) {
+  std::initializer_list<real_t> radiuses = {0.5, 1.0, 1.3};
+  real_t sum = std::accumulate(radiuses.begin(), radiuses.end(), 0);
+  for (const real_t radius : radiuses) {
     AddMicrophoneCircle(&result, count * radius / sum, radius * kMicrophoneRadius);
   }
 #endif
@@ -169,7 +169,7 @@ SimulateRecording(const std::vector<Point> &microphone_locations) {
   for (const Point &micro_pos : microphone_locations) {
     MicrophoneRecording recording(kMicrophoneSamples);
     for (const auto &s : sound_sources) {
-      const float distance = micro_pos.distance_to(s.loc);
+      const real_t distance = micro_pos.distance_to(s.loc);
       add_recording(&recording, kSampleRateHz, distance / kSpeedOfSound, s.gen);
     }
     result.push_back(recording);
@@ -203,7 +203,7 @@ void PrecalculateCrossCorrelationMatrix(
 #endif
 }
 
-void VisualizeSoundSourceLocations(float frame_width_meter,
+void VisualizeSoundSourceLocations(real_t frame_width_meter,
                                    int hightlight,
                                    TerminalCanvas *canvas) {
   // Some overlay where the sound sources are.
@@ -220,14 +220,14 @@ void VisualizeSoundSourceLocations(float frame_width_meter,
 }
 
 // Given a 2D buffer, display the available ranges of values color-coded
-void VisualizeBuffer(const Buffer2D<float> &frame_buffer,
+void VisualizeBuffer(const Buffer2D<real_t> &frame_buffer,
                      TerminalCanvas *canvas) {
   // Determine range for the coloring.
-  float smallest = 1e9;
-  float biggest = -1e9;
+  real_t smallest = 1e9;
+  real_t biggest = -1e9;
   for (int x = 0; x < canvas->width(); ++x) {
     for (int y = 0; y < canvas->height(); ++y) {
-      float v = frame_buffer.at(x, y);
+      real_t v = frame_buffer.at(x, y);
       if (v < smallest)
         smallest = v;
       if (v > biggest)
@@ -238,7 +238,7 @@ void VisualizeBuffer(const Buffer2D<float> &frame_buffer,
   const int colormap_entries = arraysize(kColorMap);
   for (int x = 0; x < canvas->width(); ++x) {
     for (int y = 0; y < canvas->height(); ++y) {
-      const float v = frame_buffer.at(x, y);
+      const real_t v = frame_buffer.at(x, y);
       if (v < smallest) {
         canvas->SetPixel(x, y, 0, 0, 0);
         continue;
@@ -264,31 +264,31 @@ void VisualizeBuffer(const Buffer2D<float> &frame_buffer,
 // microphone-pair and adding up the corresponding cross correlations for
 // each pixel.
 void ConstructSoundImage(
-    const Point &view_origin, float range, //
+    const Point &view_origin, real_t range, //
     const std::vector<Point> &microphone_loc,
     const Buffer2D<CrossCorrelation> &microphone_cross_correlation,
-    Buffer2D<float> *frame_buffer) {
+    Buffer2D<real_t> *frame_buffer) {
 
   const int microphone_count = microphone_loc.size();
   int max_offset_used = 0;
   for (int x = 0; x < frame_buffer->width(); ++x) {
     for (int y = 0; y < frame_buffer->height(); ++y) {
       // From our place, determine the vector where we're looking at.
-      const float xpix = range * x / frame_buffer->width() - range / 2;
-      const float ypix = range * y / frame_buffer->height() - range / 2;
+      const real_t xpix = range * x / frame_buffer->width() - range / 2;
+      const real_t ypix = range * y / frame_buffer->height() - range / 2;
       Point listen_dir = {xpix, ypix, 1};
       listen_dir.MakeUnitLen();  // normal vector of wavefront plane.
-      float value = 0;
+      real_t value = 0;
       // Determine distance of plane facing where we're looking at from
       // microphone. Do that for each pair of microphones and look-up the
       // corresponding cross correlation.
       for (int i = 0; i < microphone_count; ++i) {
-        const float d1 = listen_dir.dotMul(microphone_loc[i] - view_origin);
-        const float td1 = d1 / kSpeedOfSound;
+        const real_t d1 = listen_dir.dotMul(microphone_loc[i] - view_origin);
+        const real_t td1 = d1 / kSpeedOfSound;
 
         for (int j = i + 1; j < microphone_count; ++j) {
-          const float d2 = listen_dir.dotMul(microphone_loc[j] - view_origin);
-          const float td2 = d2 / kSpeedOfSound;
+          const real_t d2 = listen_dir.dotMul(microphone_loc[j] - view_origin);
+          const real_t td2 = d2 / kSpeedOfSound;
           const int offset = (td2 - td1) * kSampleRateHz;
           assert(abs(offset) < kCrossCorrelateElementsOfInterest);
           if (offset >= 0) {
@@ -346,8 +346,8 @@ char maybe_readchar() {
   return read(STDIN_FILENO, &c, 1) <= 0 ? 0 : c;
 }
 
-void move_limited(float diff, float min, float max, float *target) {
-  float new_value = *target + diff;
+void move_limited(real_t diff, real_t min, real_t max, real_t *target) {
+  real_t new_value = *target + diff;
   if (new_value > min && new_value < max)
     *target = new_value;
 }
@@ -359,7 +359,7 @@ int main() {
   Buffer2D<CrossCorrelation> cross_correlations(microphones.size(),
                                                 microphones.size());
 
-  Buffer2D<float> frame_buffer(kScreenSize, kScreenSize);
+  Buffer2D<real_t> frame_buffer(kScreenSize, kScreenSize);
 
   printf("\n"
          "Highlighted source movable     |   K         |"
@@ -385,7 +385,7 @@ int main() {
                                        &cross_correlations);
 
     // Now the actual image construction
-    const float range = std::tan(display_range / 2); // max x in one meter
+    const real_t range = std::tan(display_range / 2); // max x in one meter
     ConstructSoundImage(optical_camera_pos, range, microphones,
                         cross_correlations, &frame_buffer);
 
