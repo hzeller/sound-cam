@@ -7,6 +7,10 @@
 
 typedef float real_t;
 
+// If CROSS_MANUAL_IMPL is set to 0, then we need double as real_t, as the
+// alglib only supports double.
+#define CROSS_MANUAL_IMPL 1
+
 // Cross-correlate the first "elements" of a and b, return cross correlation
 // with "output_count" elements (thus it is possible to limit the effort if
 // only a few output elements are needed).

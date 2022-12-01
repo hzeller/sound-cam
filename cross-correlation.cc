@@ -6,14 +6,18 @@
 
 #include <alglib/fasttransforms.h>
 
-#define MANUAL_IMPL 1
+static bool PrintFirst(const char *msg) {
+  fprintf(stderr, "%s\n", msg);
+  return true;
+}
 
 // Very simplistic O(N²) implementation.
-#if MANUAL_IMPL
+#if CROSS_MANUAL_IMPL
 std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
                                     const std::vector<real_t> &b,
                                     size_t elements,
                                     int output_count) {
+  static bool init = PrintFirst("Manual cross correlation");
   if (output_count < 0) output_count = elements;
 
   assert(output_count <= (int)elements);
@@ -34,6 +38,7 @@ std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
                                     const std::vector<real_t> &b,
                                     size_t elements,
                                     int output_count) {
+  static bool init = PrintFirst("alglib cross correlation");
   if (output_count < 0) output_count = elements;
 
   alglib::real_1d_array out;
