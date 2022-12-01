@@ -5,11 +5,12 @@
 #include <vector>
 #include <cstddef>
 
-typedef float real_t;
+typedef double real_t;
 
-// If CROSS_MANUAL_IMPL is set to 0, then we need double as real_t, as the
-// alglib only supports double.
-#define CROSS_IMPL 1
+// 0: manual n^2 implementation
+// 1: fft based implentation
+// 2: alglib implentation (requires real_t to be double)
+#define CROSS_IMPL 0
 
 // Cross-correlate the first "elements" of a and b, return cross correlation
 // with "output_count" elements (thus it is possible to limit the effort if
