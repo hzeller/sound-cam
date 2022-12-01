@@ -277,7 +277,7 @@ void ConstructSoundImage(
       const float xpix = range * x / frame_buffer->width() - range / 2;
       const float ypix = range * y / frame_buffer->height() - range / 2;
       Point listen_dir = {xpix, ypix, 1};
-      listen_dir.MakeUnitLen();
+      listen_dir.MakeUnitLen();  // normal vector of wavefront plane.
       float value = 0;
       // Determine distance of plane facing where we're looking at from
       // microphone. Do that for each pair of microphones and look-up the
