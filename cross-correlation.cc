@@ -7,7 +7,7 @@
 #include <alglib/fasttransforms.h>
 
 static bool PrintFirst(const char *msg) {
-  fprintf(stderr, "%s\n", msg);
+  fprintf(stderr, "%s sizeof(real_t)=%d\n", msg, (int)sizeof(real_t));
   return true;
 }
 

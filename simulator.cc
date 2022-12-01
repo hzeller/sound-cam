@@ -363,10 +363,11 @@ int main() {
 
   printf("\n"
          "Highlighted source movable     |   K         |"
-         "  m   : show microphones\n");
+         "    m : show microphones\n");
   printf("1, 2, 3: choose source to move | H   L  Move |"
          " <ESC>: exit\n");
-  printf("                               |   J         |\n");
+  printf("                               |   J         |"
+         "    o : suspend output\n");
   term_raw();
 
   TerminalCanvas canvas(frame_buffer.width(), frame_buffer.height());
@@ -376,6 +377,7 @@ int main() {
   bool canvas_needs_jump_to_top = false;
   size_t frame_count = 0;
   bool finished = false;
+  bool do_output = true;
   const auto start_time = GetTimeInMillis();
   while (!finished) {
     // Simulate recording, including noise.
@@ -392,7 +394,9 @@ int main() {
     VisualizeBuffer(frame_buffer, &canvas);
     VisualizeSoundSourceLocations(range, move_source, &canvas);
 
-    canvas.Send(STDOUT_FILENO, canvas_needs_jump_to_top);
+    if (do_output) {
+      canvas.Send(STDOUT_FILENO, canvas_needs_jump_to_top);
+    }
     canvas_needs_jump_to_top = true;
     ++frame_count;
 
@@ -418,6 +422,10 @@ int main() {
     case 'm':
       VisualizeMicrophoneLocations(microphones);
       canvas_needs_jump_to_top = false;
+      break;
+    case 'o':
+      do_output = !do_output;
+      if (!do_output) fprintf(stderr, "Suspended output\n");
       break;
     }
   }
