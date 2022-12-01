@@ -161,18 +161,18 @@ std::vector<Point> CreateMicrophoneLocations(int count) {
 }
 
 // Simulate what each microphone sees.
-std::vector<MicrophoneRecording>
+std::vector<correlate_preprocessed_t>
 SimulateRecording(const std::vector<Point> &microphone_locations) {
   // That is dependent on the distance from the sound sources and is a sum
   // of these.
-  std::vector<MicrophoneRecording> result;
+  std::vector<correlate_preprocessed_t> result;
   for (const Point &micro_pos : microphone_locations) {
     MicrophoneRecording recording(kMicrophoneSamples);
     for (const auto &s : sound_sources) {
       const real_t distance = micro_pos.distance_to(s.loc);
       add_recording(&recording, kSampleRateHz, distance / kSpeedOfSound, s.gen);
     }
-    result.push_back(recording);
+    result.push_back(PreprocessCorrelate(recording));
   }
   return result;
 }
@@ -182,7 +182,7 @@ SimulateRecording(const std::vector<Point> &microphone_locations) {
 // TODO: we might only need to one diagonal half if we swap the locations
 // at look-up.
 void PrecalculateCrossCorrelationMatrix(
-    const std::vector<MicrophoneRecording> microphone_recording,
+    const std::vector<correlate_preprocessed_t>& microphone_recording,
     Buffer2D<CrossCorrelation> *cross_correlations) {
   assert((int)microphone_recording.size() == cross_correlations->width());
   assert((int)microphone_recording.size() == cross_correlations->height());
@@ -193,7 +193,7 @@ void PrecalculateCrossCorrelationMatrix(
         continue; // no need to self cross-correlate.
       cross_correlations->at(i, j) = cross_correlate(
           microphone_recording[i], microphone_recording[j],
-          kMicrophoneSamples / 2, kCrossCorrelateElementsOfInterest);
+          kCrossCorrelateElementsOfInterest);
       ++correlation_count;
     }
   }

@@ -141,32 +141,10 @@ static bool PrintFirst(const char *msg) {
   return true;
 }
 
-// Very simplistic O(N²) implementation.
-#if (CROSS_IMPL == 0)
-std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
-                                    const std::vector<real_t> &b,
-                                    size_t elements,
-                                    int output_count) {
-  static bool init = PrintFirst("Manual O(N²) cross correlation");
-  if (output_count < 0) output_count = elements;
-
-  assert(output_count <= (int)elements);
-  assert(a.size() >= elements + output_count);
-  assert(b.size() >= elements);
-
-  std::vector<real_t> result(output_count);
-
-  for (int i = 0; i < output_count; ++i) {
-    for (size_t j = 0; j < elements; ++j) {
-      result[i] += a[j + i] * b[j];
-    }
-  }
-  return result;
-}
-#elif (CROSS_IMPL == 1)
 std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
                                     const std::vector<real_t> &b,
                                     size_t elements, int output_count) {
+#if 0
   static bool init = PrintFirst("FFT cross correlation");
   if (output_count < 0) output_count = elements;
   assert(output_count <= (int)elements);
@@ -177,36 +155,58 @@ std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
   // Pad and reverse. We are padding because we might
   // want to correlate with a shorter filter b.
   // We also reverse the filter because we are performing a convolution.
-  std::vector<real_t> b_reversed(b.size(), 0);
-  for (unsigned i = 0; i < elements; ++i) {
-    b_reversed[b.size() - i - 1] = b[i];
-  }
+  std::vector<real_t> b_reversed({b.rbegin(), b.rend()});
+
   const auto convolved = FastConvolve(a, b_reversed);
   // The (0, 0) window element starts at 256.
   for (int i = 0; i < output_count; ++i) {
     result[i] = convolved[a.size()/2 + i];
   }
   return result;
-}
 #else
-#include <alglib/fasttransforms.h>
-std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
-                                    const std::vector<real_t> &b,
-                                    size_t elements,
-                                    int output_count) {
-  static bool init = PrintFirst("alglib cross correlation");
-  if (output_count < 0) output_count = elements;
+  return cross_correlate(PreprocessCorrelate(a), PreprocessCorrelate(b),
+                         output_count);
+#endif
+}
 
-  alglib::real_1d_array out;
-  alglib::real_1d_array signal, pattern;
-  signal.attach_to_ptr(a.size(), (real_t*)a.data());
-  pattern.attach_to_ptr(b.size(), (real_t*)b.data());
+correlate_preprocessed_t PreprocessCorrelate(const std::vector<real_t> &data) {
+  // Pad and reverse. We are padding because we might
+  // want to correlate with a shorter filter b.
+  // We also reverse the filter because we are performing a convolution.
 
-  alglib::corrr1d(signal, signal.length(), pattern, elements, out);
+  const auto padded_d = Pad(data, false);
+  auto fft_d = FastFourierTransform(padded_d);
 
-  std::vector<real_t> result(output_count);
-  std::copy(out.getcontent(), out.getcontent() + output_count,
-            result.begin());
+  const auto padded_revesed_d = Pad({data.rbegin(), data.rend()}, true);
+  const auto fft_rev_d = FastFourierTransform(padded_revesed_d);
+
+  return correlate_preprocessed_t{fft_d, fft_rev_d};
+}
+
+const std::vector<real_t> cross_correlate(const correlate_preprocessed_t &a,
+                                          const correlate_preprocessed_t &b,
+                                          int output_count) {
+  static bool init = PrintFirst("FFT cross correlation using preprocess");
+  const complex_vec_t &padded_fft_a = a.first;
+  const complex_vec_t &padded_fft_b = b.second;
+
+  complex_vec_t multiplaction_result(padded_fft_a.size());
+  for (unsigned i = 0; i < padded_fft_a.size(); ++i) {
+    multiplaction_result[i] = padded_fft_a[i] * padded_fft_b[i];
+  }
+  const complex_vec_t c = InverseFastFourierTransform(multiplaction_result);
+  const size_t num_samples = padded_fft_a.size()/2;
+
+  // TODO: do the following two things in one step.
+  std::vector<real_t> convolved(num_samples);
+  for (size_t i = 0; i < convolved.size(); ++i) {
+    convolved[i] = c[i + num_samples / 2 - 1].real();
+  }
+
+  std::vector<real_t> result(num_samples);
+  const int offset = convolved.size()/2;
+  for (int i = 0; i < output_count; ++i) {
+    result[i] = convolved[offset + i];
+  }
   return result;
 }
-#endif
