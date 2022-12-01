@@ -141,34 +141,6 @@ static bool PrintFirst(const char *msg) {
   return true;
 }
 
-std::vector<real_t> cross_correlate(const std::vector<real_t> &a,
-                                    const std::vector<real_t> &b,
-                                    size_t elements, int output_count) {
-#if 0
-  static bool init = PrintFirst("FFT cross correlation");
-  if (output_count < 0) output_count = elements;
-  assert(output_count <= (int)elements);
-  assert(a.size() >= elements + output_count);
-  assert(b.size() >= elements);
-  std::vector<real_t> result(output_count, 0);
-
-  // Pad and reverse. We are padding because we might
-  // want to correlate with a shorter filter b.
-  // We also reverse the filter because we are performing a convolution.
-  std::vector<real_t> b_reversed({b.rbegin(), b.rend()});
-
-  const auto convolved = FastConvolve(a, b_reversed);
-  // The (0, 0) window element starts at 256.
-  for (int i = 0; i < output_count; ++i) {
-    result[i] = convolved[a.size()/2 + i];
-  }
-  return result;
-#else
-  return cross_correlate(PreprocessCorrelate(a), PreprocessCorrelate(b),
-                         output_count);
-#endif
-}
-
 correlate_preprocessed_t PreprocessCorrelate(const std::vector<real_t> &data) {
   // Pad and reverse. We are padding because we might
   // want to correlate with a shorter filter b.
@@ -184,8 +156,7 @@ correlate_preprocessed_t PreprocessCorrelate(const std::vector<real_t> &data) {
 }
 
 const std::vector<real_t> cross_correlate(const correlate_preprocessed_t &a,
-                                          const correlate_preprocessed_t &b,
-                                          int output_count) {
+                                          const correlate_preprocessed_t &b) {
   static bool init = PrintFirst("FFT cross correlation using preprocess");
   const complex_vec_t &padded_fft_a = a.first;
   const complex_vec_t &padded_fft_b = b.second;
@@ -205,7 +176,7 @@ const std::vector<real_t> cross_correlate(const correlate_preprocessed_t &a,
 
   std::vector<real_t> result(num_samples);
   const int offset = convolved.size()/2;
-  for (int i = 0; i < output_count; ++i) {
+  for (size_t i = 0; i < convolved.size()/2; ++i) {
     result[i] = convolved[offset + i];
   }
   return result;

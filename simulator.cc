@@ -33,12 +33,6 @@ constexpr int kMicrophoneCount = 17;
 constexpr size_t kSampleRateHz = 48000;
 constexpr size_t kMicrophoneSamples = 1 << 9;
 
-// Maximum interesting correlation time difference needed in
-// cross-correlation.
-// We should either do that on-demand or calculate an upper bound.
-// (once cross-correlation is implemented with fft, not needed anymore)
-const int kCrossCorrelateElementsOfInterest = 75;
-
 constexpr real_t display_range = tau / 4; // Angle of view. 90 degree.
 
 typedef std::vector<real_t> MicrophoneRecording;
@@ -192,14 +186,13 @@ void PrecalculateCrossCorrelationMatrix(
       if (i == j)
         continue; // no need to self cross-correlate.
       cross_correlations->at(i, j) = cross_correlate(
-          microphone_recording[i], microphone_recording[j],
-          kCrossCorrelateElementsOfInterest);
+        microphone_recording[i], microphone_recording[j]);
       ++correlation_count;
     }
   }
 #if 0
-  fprintf(stderr, "Created %d cross correlations (with each %d output count)\n",
-          correlation_count, kCrossCorrelateElementsOfInterest);
+  fprintf(stderr, "Created %d cross correlations\n",
+          correlation_count);
 #endif
 }
 
@@ -290,7 +283,6 @@ void ConstructSoundImage(
           const real_t d2 = listen_dir.dotMul(microphone_loc[j] - view_origin);
           const real_t td2 = d2 / kSpeedOfSound;
           const int offset = (td2 - td1) * kSampleRateHz;
-          assert(abs(offset) < kCrossCorrelateElementsOfInterest);
           if (offset >= 0) {
             value += microphone_cross_correlation.at(i, j)[offset];
           } else {
