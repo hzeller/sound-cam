@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <complex>
 
-typedef double real_t;
+typedef float real_t;
 typedef std::vector<std::complex<real_t>> complex_vec_t;
 typedef std::pair<complex_vec_t, complex_vec_t> correlate_preprocessed_t;
 
