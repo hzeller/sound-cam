@@ -1,14 +1,15 @@
 
+#include <fcntl.h>
 #include <signal.h>
-#include <unistd.h>
+#include <sys/select.h>
 #include <sys/time.h>
 #include <termios.h>
-#include <sys/select.h>
-#include <fcntl.h>
+#include <unistd.h>
 
 #include <ctime>
 #include <functional>
 #include <random>
+#include <span>
 
 #include "buffer-2d.h"
 #include "colormap.h"
@@ -35,7 +36,7 @@ constexpr size_t kMicrophoneSamples = 1 << 9;
 
 constexpr real_t display_range = tau / 4; // Angle of view. 90 degree.
 
-typedef std::vector<real_t> MicrophoneRecording;
+typedef std::span<real_t> MicrophoneRecording;
 typedef std::vector<real_t> CrossCorrelation;
 typedef std::function<real_t(real_t t)> WaveExpr;
 
@@ -43,20 +44,38 @@ typedef std::function<real_t(real_t t)> WaveExpr;
 
 class Microphone {
 public:
-  Microphone() : recording(kMicrophoneSamples) {}
+  Microphone() {}
   Microphone(const Microphone&) = delete;
   Microphone(Microphone&&) = delete;
 
   Point loc;                       // Location of the microphone
   MicrophoneRecording recording;   // samples.
-
   correlate_preprocessed_t preprocess_correlate; // preprocessed samples.
 
   void ClearSamples() {
     std::fill(recording.begin(), recording.end(), 0);
   }
 };
+
 typedef std::vector<Microphone> MicrophoneArray;
+struct MicrophoneContainer {
+  MicrophoneContainer(const std::vector<Point> &locations)
+    : recording_store(locations.size() * kMicrophoneSamples), microphones(locations.size()) {
+    for (size_t i = 0; i < locations.size(); ++i) {
+      microphones[i].loc = locations[i];
+      microphones[i].recording = std::span(recording_store.begin() + i*kMicrophoneSamples,
+                                           kMicrophoneSamples);
+    }
+  }
+
+  size_t size() const { return microphones.size(); }
+
+  // Storage of all samples of all microphones back to back,
+  // possibly with padding.
+  std::vector<real_t> recording_store;
+
+  MicrophoneArray microphones;
+};
 
 typedef int64_t tmillis_t;
 static tmillis_t GetTimeInMillis() {
@@ -381,16 +400,11 @@ int main(int argc, char *argv[]) {
 
   // After we have the microphone locations, we can create a pre-allocated
   // fixed set of microphones.
-  const auto microphone_locations = CreateMicrophoneLocations(kMicrophoneCount);
-  MicrophoneArray microphones(microphone_locations.size());
-  for (size_t i = 0; i < microphone_locations.size(); ++i) {
-    microphones[i].loc = microphone_locations[i];
-  }
+  MicrophoneContainer sensor(CreateMicrophoneLocations(kMicrophoneCount));
 
-  fprintf(stderr, "Got %d microphones\n", (int)microphones.size());
+  fprintf(stderr, "Got %d microphones\n", (int)sensor.size());
 
-  Buffer2D<CrossCorrelation> cross_correlations(microphones.size(),
-                                                microphones.size());
+  Buffer2D<CrossCorrelation> cross_correlations(sensor.size(), sensor.size());
 
   Buffer2D<real_t> frame_buffer(kScreenSize, kScreenSize);
 
@@ -416,13 +430,13 @@ int main(int argc, char *argv[]) {
   while (!finished && frame_limit != 0) {
     if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
-    SimulateRecording(&microphones);
+    SimulateRecording(&sensor.microphones);
 
-    PrecalculateCrossCorrelationMatrix(microphones, &cross_correlations);
+    PrecalculateCrossCorrelationMatrix(sensor.microphones, &cross_correlations);
 
     // Now the actual image construction
     const real_t range = std::tan(display_range / 2); // max x in one meter
-    ConstructSoundImage(optical_camera_pos, range, microphones,
+    ConstructSoundImage(optical_camera_pos, range, sensor.microphones,
                         cross_correlations, &frame_buffer);
 
     VisualizeBuffer(frame_buffer, &canvas);
@@ -457,7 +471,7 @@ int main(int argc, char *argv[]) {
             move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.y);
             break;
         case 'm':
-            VisualizeMicrophoneLocations(microphones);
+            VisualizeMicrophoneLocations(sensor.microphones);
             canvas_needs_jump_to_top = false;
             break;
         case 'o':

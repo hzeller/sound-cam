@@ -103,15 +103,17 @@ void FastFourierTransform(const std::vector<std::complex<real_t>> &x,
   return FastFourierTransformImpl(x, output, false);
 }
 
-// Our kernel should match our input plus some padding to have a linear convolution.
-// We assume the size of x is a power of 2. To understand why we shift (to have padding in the center) see:
+// Our kernel should match our input plus some padding to have a linear
+// convolution. We assume the size of x is a power of 2. To understand why we
+// shift (to have padding in the center) see:
 // https://dsp.stackexchange.com/questions/82273/why-to-pad-zeros-at-the-middle-of-sequence-instead-at-the-end-of-the-sequence
-static std::vector<std::complex<real_t>> Pad(const std::vector<real_t> &x, const bool shift) {
-  const size_t size = x.size();
+template <typename Iter>
+static std::vector<std::complex<real_t>> Pad(Iter begin, Iter end, const bool shift) {
+  const size_t size = end - begin;
   std::vector<std::complex<real_t>> out(2 * size, 0);
   const size_t offset = shift ? size + size / 2 : size / 2;
   for (unsigned i = 0; i < size; ++i) {
-    out[(offset + i) % (2 * size)] = x[i];
+    out[(offset + i) % (2 * size)] = *begin++;
   }
   return out;
 }
@@ -121,7 +123,7 @@ static bool PrintFirst(const char *msg) {
   return true;
 }
 
-void PreprocessCorrelate(const std::vector<real_t> &data,
+void PreprocessCorrelate(const std::span<real_t> &data,
                          correlate_preprocessed_t *result) {
   if (result->first.empty()) {
     result->first.resize(2*data.size());
@@ -131,10 +133,10 @@ void PreprocessCorrelate(const std::vector<real_t> &data,
   // want to correlate with a shorter filter b.
   // We also reverse the filter because we are performing a convolution.
 
-  const auto padded_d = Pad(data, false);
+  const auto padded_d = Pad(data.begin(), data.end(), false);
   FastFourierTransform(padded_d, &result->first);
 
-  const auto padded_revesed_d = Pad({data.rbegin(), data.rend()}, true);
+  const auto padded_revesed_d = Pad(data.rbegin(), data.rend(), true);
   FastFourierTransform(padded_revesed_d, &result->second);
 }
 
