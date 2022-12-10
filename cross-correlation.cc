@@ -24,14 +24,16 @@ T reverse_bits(T n, short width) {
   return output;
 }
 
-static std::vector<std::complex<real_t>> FastFourierTransformImpl(
-  const std::vector<std::complex<real_t>> &x, const bool inverse) {
+static void FastFourierTransformImpl(const std::vector<std::complex<real_t>> &x,
+                                     std::vector<std::complex<real_t>> *output,
+                                     const bool inverse) {
   const size_t num_samples = x.size();
+  assert(output->size() == num_samples);
   assert((num_samples & (num_samples - 1)) == 0 && "number of samples not a power of 2!");
 
   // Let's compute log2 of the number of samples.
   const unsigned log2_num_samples = log2(num_samples);
-  std::vector<std::complex<real_t>> output(num_samples, 0);
+  std::fill(output->begin(), output->end(), 0);
 
   // We have to do a bit-reverse copy of the input in the output.
   // What does it mean? It means we have to take the index value starting from zero,
@@ -39,7 +41,7 @@ static std::vector<std::complex<real_t>> FastFourierTransformImpl(
   // For instance, 1010 -> 0101.
   for (size_t i = 0; i < x.size(); ++i) {
     const size_t ri = reverse_bits<size_t>(i, log2_num_samples);
-    output[ri] = x[i];
+    (*output)[ri] = x[i];
   }
 
   using namespace std::complex_literals;
@@ -68,15 +70,15 @@ static std::vector<std::complex<real_t>> FastFourierTransformImpl(
       std::complex<real_t> w = 1;
       for (size_t j = 0; j < (m / 2); ++j) {
         // Butterfly diagram "diagonal" edges, they are multiplied by w.
-        const auto t = w * output[k + j + m / 2];
+        const auto t = w * (*output)[k + j + m / 2];
 
         // Butterfly diagram "direct" edges. Not multiplied by anything.
-        const auto u = output[k + j];
+        const auto u = (*output)[k + j];
 
         // Update the values for this couple of sub-ffts for
         // both the sub-coefficients.
-        output[k + j] = u + t;
-        output[k + j + m / 2] = u - t;
+        (*output)[k + j] = u + t;
+        (*output)[k + j + m / 2] = u - t;
 
         // Prepare w for the next sub-coefficients!
         w = w * w_m;
@@ -84,19 +86,21 @@ static std::vector<std::complex<real_t>> FastFourierTransformImpl(
     }
   }
   if (inverse) {
-    for (size_t i = 0; i < output.size(); ++i) {
-      output[i] = real_t(1.0) * output[i] / static_cast<real_t>(output.size());
+    real_t float_size = static_cast<real_t>(output->size());
+    for (size_t i = 0; i < output->size(); ++i) {
+      (*output)[i] /= float_size;
     }
   }
-  return output;
 }
 
-std::vector<std::complex<real_t>> InverseFastFourierTransform(const std::vector<std::complex<real_t>> &x) {
-  return FastFourierTransformImpl(x, true);
+void InverseFastFourierTransform(const std::vector<std::complex<real_t>> &x,
+                                 std::vector<std::complex<real_t>> *output) {
+  return FastFourierTransformImpl(x, output, true);
 }
 
-std::vector<std::complex<real_t>> FastFourierTransform(const std::vector<std::complex<real_t>> &x) {
-  return FastFourierTransformImpl(x, false);
+void FastFourierTransform(const std::vector<std::complex<real_t>> &x,
+                          std::vector<std::complex<real_t>> *output) {
+  return FastFourierTransformImpl(x, output, false);
 }
 
 // Our kernel should match our input plus some padding to have a linear convolution.
@@ -112,47 +116,26 @@ static std::vector<std::complex<real_t>> Pad(const std::vector<real_t> &x, const
   return out;
 }
 
-static std::vector<real_t> FastConvolve(const std::vector<real_t> &a, const std::vector<real_t> &b) {
-  assert(a.size() == b.size());
-  const size_t num_samples = a.size();
-  assert((num_samples & (num_samples - 1)) == 0 && "number of samples not a power of 2!");
-  const auto padded_a = Pad(a, false);
-  const auto padded_b = Pad(b, true);
-  assert(padded_a.size() == num_samples * 2);
-  assert(padded_b.size() == num_samples * 2);
-
-  auto fft_a = FastFourierTransform(padded_a);
-  const auto fft_b = FastFourierTransform(padded_b);
-
-  // Multiply the values.
-  for (unsigned i = 0; i < num_samples * 2; ++i) {
-    fft_a[i] = fft_a[i] * fft_b[i];
-  }
-  const auto reconstructed = InverseFastFourierTransform(fft_a);
-  std::vector<real_t> out(num_samples, 0);
-  for (unsigned i = 0; i < out.size(); ++i) {
-    out[i] = reconstructed[i + num_samples / 2 - 1].real();
-  }
-  return out;
-}
-
 static bool PrintFirst(const char *msg) {
   fprintf(stderr, "%s sizeof(real_t)=%d\n", msg, (int)sizeof(real_t));
   return true;
 }
 
-correlate_preprocessed_t PreprocessCorrelate(const std::vector<real_t> &data) {
+void PreprocessCorrelate(const std::vector<real_t> &data,
+                         correlate_preprocessed_t *result) {
+  if (result->first.empty()) {
+    result->first.resize(2*data.size());
+    result->second.resize(2*data.size());
+  }
   // Pad and reverse. We are padding because we might
   // want to correlate with a shorter filter b.
   // We also reverse the filter because we are performing a convolution.
 
   const auto padded_d = Pad(data, false);
-  auto fft_d = FastFourierTransform(padded_d);
+  FastFourierTransform(padded_d, &result->first);
 
   const auto padded_revesed_d = Pad({data.rbegin(), data.rend()}, true);
-  const auto fft_rev_d = FastFourierTransform(padded_revesed_d);
-
-  return correlate_preprocessed_t{fft_d, fft_rev_d};
+  FastFourierTransform(padded_revesed_d, &result->second);
 }
 
 const std::vector<real_t> cross_correlate(const correlate_preprocessed_t &a,
@@ -165,7 +148,8 @@ const std::vector<real_t> cross_correlate(const correlate_preprocessed_t &a,
   for (unsigned i = 0; i < padded_fft_a.size(); ++i) {
     multiplaction_result[i] = padded_fft_a[i] * padded_fft_b[i];
   }
-  const complex_vec_t c = InverseFastFourierTransform(multiplaction_result);
+  complex_vec_t c(padded_fft_a.size());
+  InverseFastFourierTransform(multiplaction_result, &c);
   const size_t num_samples = padded_fft_a.size()/2;
 
   // TODO: do the following two things in one step.

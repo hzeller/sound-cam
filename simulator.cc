@@ -182,7 +182,7 @@ void SimulateRecording(MicrophoneArray *microphones) {
       add_recording(&microphone.recording, kSampleRateHz,
                     distance / kSpeedOfSound, s.gen);
     }
-    microphone.preprocess_correlate = PreprocessCorrelate(microphone.recording);
+    PreprocessCorrelate(microphone.recording, &microphone.preprocess_correlate);
   }
 }
 
