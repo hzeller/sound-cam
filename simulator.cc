@@ -344,7 +344,25 @@ void move_limited(real_t diff, real_t min, real_t max, real_t *target) {
     *target = new_value;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+  bool do_output = true;
+  bool read_keyboard = true;
+  int frame_limit = -1;
+
+  int opt;
+  while ((opt = getopt(argc, argv, "f:")) != -1) {
+    switch (opt) {
+    case 'f':
+      frame_limit = atoi(optarg);
+      do_output = false;  // Used to performance test, so no output.
+      read_keyboard = false;
+      break;
+    default:
+      fprintf(stderr, "Usage: %s [-f <frames>]\n", argv[0]);
+      return 0;
+    }
+  }
+
   const auto microphones = CreateMicrophoneLocations(kMicrophoneCount);
   fprintf(stderr, "Got %d microphones\n", (int)microphones.size());
 
@@ -353,14 +371,16 @@ int main() {
 
   Buffer2D<real_t> frame_buffer(kScreenSize, kScreenSize);
 
-  printf("\n"
-         "Highlighted source movable     |   K         |"
-         "    m : show microphones\n");
-  printf("1, 2, 3: choose source to move | H   L  Move |"
-         " <ESC>: exit\n");
-  printf("                               |   J         |"
-         "    o : switch output\n");
-  term_raw();
+  if (read_keyboard) {
+    printf("\n"
+           "Highlighted source movable     |   K         |"
+           "    m : show microphones\n");
+    printf("1, 2, 3: choose source to move | H   L  Move |"
+           " <ESC>: exit\n");
+    printf("                               |   J         |"
+           "    o : switch output\n");
+    term_raw();
+  }
 
   TerminalCanvas canvas(frame_buffer.width(), frame_buffer.height());
   canvas.CursorOff(STDOUT_FILENO);
@@ -369,9 +389,9 @@ int main() {
   bool canvas_needs_jump_to_top = false;
   size_t frame_count = 0;
   bool finished = false;
-  bool do_output = true;
   const auto start_time = GetTimeInMillis();
-  while (!finished) {
+  while (!finished && frame_limit != 0) {
+    if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
     auto microphone_recordings = SimulateRecording(microphones);
 
@@ -392,33 +412,37 @@ int main() {
     canvas_needs_jump_to_top = true;
     ++frame_count;
 
-    switch (maybe_readchar()) {
-    case '\033':
-      finished = true;
-      break;
-    case '1': move_source = 0; break;
-    case '2': move_source = 1; break;
-    case '3': move_source = 2; break;
-    case 'h': case 'H':
-      move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.x);
-      break;
-    case 'j': case 'J':
-      move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.y);
-      break;
-    case 'l': case 'L':
-      move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.x);
-      break;
-    case 'k': case 'K':
-      move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.y);
-      break;
-    case 'm':
-      VisualizeMicrophoneLocations(microphones);
-      canvas_needs_jump_to_top = false;
-      break;
-    case 'o':
-      do_output = !do_output;
-      if (!do_output) fprintf(stderr, "Suspended output\n");
-      break;
+    if (read_keyboard) {
+        switch (maybe_readchar()) {
+        case '\033': finished = true; break;
+        case '1': move_source = 0; break;
+        case '2': move_source = 1; break;
+        case '3': move_source = 2; break;
+        case 'h':
+        case 'H':
+            move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.x);
+            break;
+        case 'j':
+        case 'J':
+            move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.y);
+            break;
+        case 'l':
+        case 'L':
+            move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.x);
+            break;
+        case 'k':
+        case 'K':
+            move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.y);
+            break;
+        case 'm':
+            VisualizeMicrophoneLocations(microphones);
+            canvas_needs_jump_to_top = false;
+            break;
+        case 'o':
+            do_output = !do_output;
+            if (!do_output) fprintf(stderr, "Suspended output\n");
+            break;
+        }
     }
   }
   const auto duration_ms = GetTimeInMillis() - start_time;
