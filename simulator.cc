@@ -41,6 +41,23 @@ typedef std::function<real_t(real_t t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
 
+class Microphone {
+public:
+  Microphone() : recording(kMicrophoneSamples) {}
+  Microphone(const Microphone&) = delete;
+  Microphone(Microphone&&) = delete;
+
+  Point loc;                       // Location of the microphone
+  MicrophoneRecording recording;   // samples.
+
+  correlate_preprocessed_t preprocess_correlate; // preprocessed samples.
+
+  void ClearSamples() {
+    std::fill(recording.begin(), recording.end(), 0);
+  }
+};
+typedef std::vector<Microphone> MicrophoneArray;
+
 typedef int64_t tmillis_t;
 static tmillis_t GetTimeInMillis() {
   struct timeval tp;
@@ -112,25 +129,25 @@ void add_recording(MicrophoneRecording *recording, int sample_frequency_hz,
   }
 }
 
-void VisualizeMicrophoneLocations(const std::vector<Point> &microphones) {
+void VisualizeMicrophoneLocations(const MicrophoneArray &microphones) {
   real_t fmin = 0, fmax = 0;
-  for (const Point &micro_pos : microphones) {
-    if (micro_pos.x < fmin)
-      fmin = micro_pos.x;
-    if (micro_pos.y < fmin)
-      fmin = micro_pos.y;
-    if (micro_pos.x > fmax)
-      fmax = micro_pos.x;
-    if (micro_pos.y > fmax)
-      fmax = micro_pos.y;
+  for (const Microphone &micro : microphones) {
+    if (micro.loc.x < fmin)
+      fmin = micro.loc.x;
+    if (micro.loc.y < fmin)
+      fmin = micro.loc.y;
+    if (micro.loc.x > fmax)
+      fmax = micro.loc.x;
+    if (micro.loc.y > fmax)
+      fmax = micro.loc.y;
   }
 
   // Print microphones.
   fprintf(stderr, "Microphone min=%.2f max=%.2f\n", fmin, fmax);
   TerminalCanvas canvas(kScreenSize, kScreenSize);
-  for (const Point &m : microphones) {
-    int x = int((canvas.width() - 1) * (m.x - fmin) / (fmax - fmin));
-    int y = int((canvas.height() - 1) * (m.y - fmin) / (fmax - fmin));
+  for (const Microphone &m : microphones) {
+    int x = int((canvas.width() - 1) * (m.loc.x - fmin) / (fmax - fmin));
+    int y = int((canvas.height() - 1) * (m.loc.y - fmin) / (fmax - fmin));
     canvas.SetPixel(x, y, 255, 255, 255);
   }
   canvas.Send(STDOUT_FILENO, false);
@@ -155,20 +172,18 @@ std::vector<Point> CreateMicrophoneLocations(int count) {
 }
 
 // Simulate what each microphone sees.
-std::vector<correlate_preprocessed_t>
-SimulateRecording(const std::vector<Point> &microphone_locations) {
+void SimulateRecording(MicrophoneArray *microphones) {
   // That is dependent on the distance from the sound sources and is a sum
   // of these.
-  std::vector<correlate_preprocessed_t> result;
-  for (const Point &micro_pos : microphone_locations) {
-    MicrophoneRecording recording(kMicrophoneSamples);
+  for (Microphone &microphone : *microphones) {
+    microphone.ClearSamples();
     for (const auto &s : sound_sources) {
-      const real_t distance = micro_pos.distance_to(s.loc);
-      add_recording(&recording, kSampleRateHz, distance / kSpeedOfSound, s.gen);
+      const real_t distance = microphone.loc.distance_to(s.loc);
+      add_recording(&microphone.recording, kSampleRateHz,
+                    distance / kSpeedOfSound, s.gen);
     }
-    result.push_back(PreprocessCorrelate(recording));
+    microphone.preprocess_correlate = PreprocessCorrelate(microphone.recording);
   }
-  return result;
 }
 
 // Prepare cross correlations between each microphone pair and remember them
@@ -176,17 +191,18 @@ SimulateRecording(const std::vector<Point> &microphone_locations) {
 // TODO: we might only need to one diagonal half if we swap the locations
 // at look-up.
 void PrecalculateCrossCorrelationMatrix(
-    const std::vector<correlate_preprocessed_t>& microphone_recording,
+    const MicrophoneArray& microphones,
     Buffer2D<CrossCorrelation> *cross_correlations) {
-  assert((int)microphone_recording.size() == cross_correlations->width());
-  assert((int)microphone_recording.size() == cross_correlations->height());
+  assert((int)microphones.size() == cross_correlations->width());
+  assert((int)microphones.size() == cross_correlations->height());
   int correlation_count = 0;
-  for (size_t i = 0; i < microphone_recording.size(); ++i) {
-    for (size_t j = 0; j < microphone_recording.size(); ++j) {
+  for (size_t i = 0; i < microphones.size(); ++i) {
+    for (size_t j = 0; j < microphones.size(); ++j) {
       if (i == j)
         continue; // no need to self cross-correlate.
       cross_correlations->at(i, j) = cross_correlate(
-        microphone_recording[i], microphone_recording[j]);
+        microphones[i].preprocess_correlate,
+        microphones[j].preprocess_correlate);
       ++correlation_count;
     }
   }
@@ -258,11 +274,11 @@ void VisualizeBuffer(const Buffer2D<real_t> &frame_buffer,
 // each pixel.
 void ConstructSoundImage(
     const Point &view_origin, real_t range, //
-    const std::vector<Point> &microphone_loc,
+    const MicrophoneArray& microphones,
     const Buffer2D<CrossCorrelation> &microphone_cross_correlation,
     Buffer2D<real_t> *frame_buffer) {
 
-  const int microphone_count = microphone_loc.size();
+  const int microphone_count = microphones.size();
   int max_offset_used = 0;
   for (int x = 0; x < frame_buffer->width(); ++x) {
     for (int y = 0; y < frame_buffer->height(); ++y) {
@@ -276,11 +292,11 @@ void ConstructSoundImage(
       // microphone. Do that for each pair of microphones and look-up the
       // corresponding cross correlation.
       for (int i = 0; i < microphone_count; ++i) {
-        const real_t d1 = listen_dir.dotMul(microphone_loc[i] - view_origin);
+        const real_t d1 = listen_dir.dotMul(microphones[i].loc - view_origin);
         const real_t td1 = d1 / kSpeedOfSound;
 
         for (int j = i + 1; j < microphone_count; ++j) {
-          const real_t d2 = listen_dir.dotMul(microphone_loc[j] - view_origin);
+          const real_t d2 = listen_dir.dotMul(microphones[j].loc - view_origin);
           const real_t td2 = d2 / kSpeedOfSound;
           const int offset = (td2 - td1) * kSampleRateHz;
           if (offset >= 0) {
@@ -363,7 +379,14 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  const auto microphones = CreateMicrophoneLocations(kMicrophoneCount);
+  // After we have the microphone locations, we can create a pre-allocated
+  // fixed set of microphones.
+  const auto microphone_locations = CreateMicrophoneLocations(kMicrophoneCount);
+  MicrophoneArray microphones(microphone_locations.size());
+  for (size_t i = 0; i < microphone_locations.size(); ++i) {
+    microphones[i].loc = microphone_locations[i];
+  }
+
   fprintf(stderr, "Got %d microphones\n", (int)microphones.size());
 
   Buffer2D<CrossCorrelation> cross_correlations(microphones.size(),
@@ -393,10 +416,9 @@ int main(int argc, char *argv[]) {
   while (!finished && frame_limit != 0) {
     if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
-    auto microphone_recordings = SimulateRecording(microphones);
+    SimulateRecording(&microphones);
 
-    PrecalculateCrossCorrelationMatrix(microphone_recordings,
-                                       &cross_correlations);
+    PrecalculateCrossCorrelationMatrix(microphones, &cross_correlations);
 
     // Now the actual image construction
     const real_t range = std::tan(display_range / 2); // max x in one meter
