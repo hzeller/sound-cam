@@ -24,8 +24,8 @@ T reverse_bits(T n, short width) {
   return output;
 }
 
-static void FastFourierTransformImpl(const std::vector<std::complex<real_t>> &x,
-                                     std::vector<std::complex<real_t>> *output,
+static void FastFourierTransformImpl(const complex_vec_t &x,
+                                     complex_vec_t *output,
                                      const bool inverse) {
   const size_t num_samples = x.size();
   assert(output->size() == num_samples);
@@ -93,14 +93,12 @@ static void FastFourierTransformImpl(const std::vector<std::complex<real_t>> &x,
   }
 }
 
-void InverseFastFourierTransform(const std::vector<std::complex<real_t>> &x,
-                                 std::vector<std::complex<real_t>> *output) {
-  return FastFourierTransformImpl(x, output, true);
+void InvFFT(const complex_vec_t &d, complex_vec_t *output) {
+  return FastFourierTransformImpl(d, output, true);
 }
 
-void FastFourierTransform(const std::vector<std::complex<real_t>> &x,
-                          std::vector<std::complex<real_t>> *output) {
-  return FastFourierTransformImpl(x, output, false);
+void FFT(const complex_vec_t &d, complex_vec_t *output) {
+  return FastFourierTransformImpl(d, output, false);
 }
 
 // Our kernel should match our input plus some padding to have a linear
@@ -134,10 +132,10 @@ void PreprocessCorrelate(const std::span<real_t> &data,
   // We also reverse the filter because we are performing a convolution.
 
   const auto padded_d = Pad(data.begin(), data.end(), false);
-  FastFourierTransform(padded_d, &result->first);
+  FFT(padded_d, &result->first);
 
   const auto padded_revesed_d = Pad(data.rbegin(), data.rend(), true);
-  FastFourierTransform(padded_revesed_d, &result->second);
+  FFT(padded_revesed_d, &result->second);
 }
 
 const std::vector<real_t> cross_correlate(const correlate_preprocessed_t &a,
@@ -151,7 +149,7 @@ const std::vector<real_t> cross_correlate(const correlate_preprocessed_t &a,
     multiplaction_result[i] = padded_fft_a[i] * padded_fft_b[i];
   }
   complex_vec_t c(padded_fft_a.size());
-  InverseFastFourierTransform(multiplaction_result, &c);
+  InvFFT(multiplaction_result, &c);
   const size_t num_samples = padded_fft_a.size()/2;
 
   // TODO: do the following two things in one step.

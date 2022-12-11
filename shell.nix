@@ -10,5 +10,9 @@ pkgs.mkShell {
       clang-tools
       clang
       linuxKernel.packages.linux_5_15.perf  # performance tests
+
+      # For experiments
+      gnuplot
+      timg
     ];
 }
