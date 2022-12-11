@@ -45,26 +45,25 @@ typedef std::function<real_t(real_t t)> WaveExpr;
 class Microphone {
 public:
   Microphone() {}
-  Microphone(const Microphone&) = delete;
-  Microphone(Microphone&&) = delete;
+  Microphone(const Microphone &) = delete;
+  Microphone(Microphone &&)      = delete;
 
-  Point loc;                       // Location of the microphone
-  MicrophoneRecording recording;   // samples.
-  correlate_preprocessed_t preprocess_correlate; // preprocessed samples.
+  Point loc;                                      // Place of the microphone
+  MicrophoneRecording recording;                  // samples.
+  correlate_preprocessed_t preprocess_correlate;  // preprocessed samples.
 
-  void ClearSamples() {
-    std::fill(recording.begin(), recording.end(), 0);
-  }
+  void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
 };
 
 typedef std::vector<Microphone> MicrophoneArray;
 struct MicrophoneContainer {
   MicrophoneContainer(const std::vector<Point> &locations)
-    : recording_store(locations.size() * kMicrophoneSamples), microphones(locations.size()) {
+      : recording_store(locations.size() * kMicrophoneSamples),
+        microphones(locations.size()) {
     for (size_t i = 0; i < locations.size(); ++i) {
-      microphones[i].loc = locations[i];
-      microphones[i].recording = std::span(recording_store.begin() + i*kMicrophoneSamples,
-                                           kMicrophoneSamples);
+      microphones[i].loc       = locations[i];
+      microphones[i].recording = std::span(
+        recording_store.begin() + i * kMicrophoneSamples, kMicrophoneSamples);
     }
   }
 

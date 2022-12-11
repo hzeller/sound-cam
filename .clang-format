@@ -1,6 +1,6 @@
 # Formatting used in this project
 BasedOnStyle: Google
-AccessModifierOffset: -4
+AccessModifierOffset: -2
 AlignAfterOpenBracket: Align
 AlignArrayOfStructures: Left
 AlignConsecutiveAssignments: Consecutive
@@ -13,8 +13,8 @@ BreakBeforeBraces: Custom
 BraceWrapping:
   BeforeElse: true
   BeforeCatch: true
-ContinuationIndentWidth: 4
+ContinuationIndentWidth: 2
 IndentAccessModifiers: false
 IndentCaseLabels: false
 IndentPPDirectives: AfterHash
-IndentWidth: 4
+IndentWidth: 2
