@@ -36,11 +36,17 @@ constexpr size_t kMicrophoneSamples = 1 << 9;
 
 constexpr real_t display_range = tau / 4; // Angle of view. 90 degree.
 
-typedef std::span<real_t> MicrophoneRecording;
-typedef std::vector<real_t> CrossCorrelation;
+typedef std::span<std::complex<real_t>> SampleArray;
 typedef std::function<real_t(real_t t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
+
+static int RoundToNextPowerOf2(int val) {
+  if ((val & (val - 1)) == 0) return val;
+  int bit_count = 0;
+  while (val >>= 1) ++bit_count;
+  return 1 << (bit_count+1);
+}
 
 class Microphone {
 public:
@@ -49,29 +55,86 @@ public:
   Microphone(Microphone &&)      = delete;
 
   Point loc;                                      // Place of the microphone
-  MicrophoneRecording recording;                  // samples.
-  correlate_preprocessed_t preprocess_correlate;  // preprocessed samples.
+  SampleArray recording;  // samples.
+
+  complex_vec_t microphone_fft;     // local microphone fft
+  complex_vec_t cross_correlation;  // cross correlation with all mics
+
+  void PreparePatternSampleFFT(complex_vec_t *reverse_scratch) {
+    // filling the end with reverse pattern.
+    std::copy(recording.rbegin(), recording.rend(),
+              reverse_scratch->end() - recording.size());
+    FFT(*reverse_scratch, &microphone_fft);
+  }
+
+  void PrepareCrossCorrelation(const complex_vec_t &all_mic_fft,
+                               complex_vec_t *conv_scratch) {
+    // convolution
+    for (size_t i = 0; i < microphone_fft.size(); ++i) {
+      (*conv_scratch)[i] = all_mic_fft[i] * microphone_fft[i];
+    }
+    InvFFT(*conv_scratch, &cross_correlation);
+  }
 
   void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
 };
 
 typedef std::vector<Microphone> MicrophoneArray;
 struct MicrophoneContainer {
-  MicrophoneContainer(const std::vector<Point> &locations)
-      : recording_store(locations.size() * kMicrophoneSamples),
-        microphones(locations.size()) {
-    for (size_t i = 0; i < locations.size(); ++i) {
-      microphones[i].loc       = locations[i];
+  MicrophoneContainer(const std::vector<Point> &locations, int samples)
+    : microphone_count(locations.size()),
+      recording_store(RoundToNextPowerOf2(microphone_count * samples * 2)),
+      all_recording_fft(recording_store.size()),
+      reverse_scratch_store(recording_store.size()),
+      convolution_scratch_store(recording_store.size()),
+      mic_offset(recording_store.size() / microphone_count),
+      pad_offset((mic_offset - samples) / 2),
+      microphones(microphone_count) {
+    fprintf(stderr, "FFT size: %d\n", (int)recording_store.size());
+    for (size_t i = 0; i < microphones.size(); ++i) {
+      microphones[i].loc = locations[i];
       microphones[i].recording = std::span(
-        recording_store.begin() + i * kMicrophoneSamples, kMicrophoneSamples);
+        recording_store.begin() + i * mic_offset + pad_offset, samples);
+      microphones[i].microphone_fft.resize(recording_store.size());
+      microphones[i].cross_correlation.resize(recording_store.size());
     }
   }
 
-  size_t size() const { return microphones.size(); }
+  size_t size() const { return microphone_count; }
+
+  // Fill all microphones with same content for testing.
+  void FillMicrophonesWith(const SampleArray &content) {
+    for (auto &m : microphones) {
+      std::copy(content.begin(), content.end(), m.recording.begin());
+    }
+  }
+
+  void PrepareCrossCorrelations() {
+    FFT(recording_store, &all_recording_fft);
+    for (auto &m : microphones) {
+      m.PreparePatternSampleFFT(&reverse_scratch_store);
+      m.PrepareCrossCorrelation(all_recording_fft,
+                                &convolution_scratch_store);
+    }
+  }
+
+  // Get correlation between microphone "m1" and "m2" at sampling time offset
+  real_t getCorrelation(size_t m1, size_t m2, int offset) const {
+    constexpr int kMagicLookupOffset = -1; // unclear, always one left ?
+    return microphones[m1]
+      .cross_correlation[m2*mic_offset+pad_offset+offset+kMagicLookupOffset]
+      .real();
+  }
 
   // Storage of all samples of all microphones back to back,
   // possibly with padding.
-  std::vector<real_t> recording_store;
+  int microphone_count;
+  complex_vec_t recording_store;
+  complex_vec_t all_recording_fft;
+  complex_vec_t reverse_scratch_store;
+  complex_vec_t convolution_scratch_store;
+  int mic_offset;
+  int pad_offset;
 
   MicrophoneArray microphones;
 };
@@ -138,7 +201,7 @@ static struct SoundSource {
 };
 
 // Add a recording with the given phase shift and wave.
-void add_recording(MicrophoneRecording *recording, int sample_frequency_hz,
+void add_recording(SampleArray *recording, int sample_frequency_hz,
                    real_t phase_shift_seconds,
                    std::function<real_t(real_t t)> wave_f) {
   for (size_t i = 0; i < recording->size(); ++i) {
@@ -200,34 +263,7 @@ void SimulateRecording(MicrophoneArray *microphones) {
       add_recording(&microphone.recording, kSampleRateHz,
                     distance / kSpeedOfSound, s.gen);
     }
-    PreprocessCorrelate(microphone.recording, &microphone.preprocess_correlate);
   }
-}
-
-// Prepare cross correlations between each microphone pair and remember them
-// for quick look-up later.
-// TODO: we might only need to one diagonal half if we swap the locations
-// at look-up.
-void PrecalculateCrossCorrelationMatrix(
-    const MicrophoneArray& microphones,
-    Buffer2D<CrossCorrelation> *cross_correlations) {
-  assert((int)microphones.size() == cross_correlations->width());
-  assert((int)microphones.size() == cross_correlations->height());
-  int correlation_count = 0;
-  for (size_t i = 0; i < microphones.size(); ++i) {
-    for (size_t j = 0; j < microphones.size(); ++j) {
-      if (i == j)
-        continue; // no need to self cross-correlate.
-      cross_correlations->at(i, j) = cross_correlate(
-        microphones[i].preprocess_correlate,
-        microphones[j].preprocess_correlate);
-      ++correlation_count;
-    }
-  }
-#if 0
-  fprintf(stderr, "Created %d cross correlations\n",
-          correlation_count);
-#endif
 }
 
 void VisualizeSoundSourceLocations(real_t frame_width_meter,
@@ -292,10 +328,10 @@ void VisualizeBuffer(const Buffer2D<real_t> &frame_buffer,
 // each pixel.
 void ConstructSoundImage(
     const Point &view_origin, real_t range, //
-    const MicrophoneArray& microphones,
-    const Buffer2D<CrossCorrelation> &microphone_cross_correlation,
+    const MicrophoneContainer &sensor,
     Buffer2D<real_t> *frame_buffer) {
 
+  const MicrophoneArray &microphones = sensor.microphones;
   const int microphone_count = microphones.size();
   int max_offset_used = 0;
   for (int x = 0; x < frame_buffer->width(); ++x) {
@@ -317,11 +353,7 @@ void ConstructSoundImage(
           const real_t d2 = listen_dir.dotMul(microphones[j].loc - view_origin);
           const real_t td2 = d2 / kSpeedOfSound;
           const int offset = (td2 - td1) * kSampleRateHz;
-          if (offset >= 0) {
-            value += microphone_cross_correlation.at(i, j)[offset];
-          } else {
-            value += microphone_cross_correlation.at(j, i)[-offset];
-          }
+          value += sensor.getCorrelation(j, i, offset);
           if (abs(offset) > max_offset_used)
             max_offset_used = abs(offset);
         }
@@ -399,11 +431,11 @@ int main(int argc, char *argv[]) {
 
   // After we have the microphone locations, we can create a pre-allocated
   // fixed set of microphones.
-  MicrophoneContainer sensor(CreateMicrophoneLocations(kMicrophoneCount));
+
+  MicrophoneContainer sensor(CreateMicrophoneLocations(kMicrophoneCount),
+                             kMicrophoneSamples);
 
   fprintf(stderr, "Got %d microphones\n", (int)sensor.size());
-
-  Buffer2D<CrossCorrelation> cross_correlations(sensor.size(), sensor.size());
 
   Buffer2D<real_t> frame_buffer(kScreenSize, kScreenSize);
 
@@ -430,13 +462,11 @@ int main(int argc, char *argv[]) {
     if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
     SimulateRecording(&sensor.microphones);
-
-    PrecalculateCrossCorrelationMatrix(sensor.microphones, &cross_correlations);
+    sensor.PrepareCrossCorrelations();
 
     // Now the actual image construction
     const real_t range = std::tan(display_range / 2); // max x in one meter
-    ConstructSoundImage(optical_camera_pos, range, sensor.microphones,
-                        cross_correlations, &frame_buffer);
+    ConstructSoundImage(optical_camera_pos, range, sensor, &frame_buffer);
 
     VisualizeBuffer(frame_buffer, &canvas);
     VisualizeSoundSourceLocations(range, move_source, &canvas);
