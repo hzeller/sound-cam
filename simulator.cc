@@ -36,7 +36,7 @@ constexpr size_t kMicrophoneSamples = 1 << 9;
 
 constexpr real_t display_range = tau / 4; // Angle of view. 90 degree.
 
-typedef std::span<std::complex<real_t>> SampleArray;
+typedef std::span<std::complex<real_t>> MicrophoneRecording;
 typedef std::function<real_t(real_t t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
@@ -54,8 +54,8 @@ public:
   Microphone(const Microphone &) = delete;
   Microphone(Microphone &&)      = delete;
 
-  Point loc;                                      // Place of the microphone
-  SampleArray recording;  // samples.
+  Point loc;                      // Place of the microphone
+  MicrophoneRecording recording;  // samples.
 
   complex_vec_t microphone_fft;     // local microphone fft
   complex_vec_t cross_correlation;  // cross correlation with all mics
@@ -69,7 +69,7 @@ public:
 
   void PrepareCrossCorrelation(const complex_vec_t &all_mic_fft,
                                complex_vec_t *conv_scratch) {
-    // convolution
+    // Convolution with our reversed input fft and the fft of all microphones
     for (size_t i = 0; i < microphone_fft.size(); ++i) {
       (*conv_scratch)[i] = all_mic_fft[i] * microphone_fft[i];
     }
@@ -82,32 +82,30 @@ public:
 typedef std::vector<Microphone> MicrophoneArray;
 struct MicrophoneContainer {
   MicrophoneContainer(const std::vector<Point> &locations, int samples)
-    : microphone_count(locations.size()),
-      recording_store(RoundToNextPowerOf2(microphone_count * samples * 2)),
+    : microphones(locations.size()),
+      // The sampling storage, power of two for FFT convenience
+      recording_store(RoundToNextPowerOf2(microphones.size() * samples * 2)),
+
+      // other FFT used storage derived from that
       all_recording_fft(recording_store.size()),
       reverse_scratch_store(recording_store.size()),
       convolution_scratch_store(recording_store.size()),
-      mic_offset(recording_store.size() / microphone_count),
-      pad_offset((mic_offset - samples) / 2),
-      microphones(microphone_count) {
+
+      // Spacing with enough padding within the input array.
+      mic_offset(recording_store.size() / microphones.size()),
+      pad_offset((mic_offset - samples) / 2) {
+
     fprintf(stderr, "FFT size: %d\n", (int)recording_store.size());
     for (size_t i = 0; i < microphones.size(); ++i) {
-      microphones[i].loc = locations[i];
-      microphones[i].recording = std::span(
+      microphones[i].loc       = locations[i];
+      microphones[i].recording = std::span(  // choose padded subsections
         recording_store.begin() + i * mic_offset + pad_offset, samples);
       microphones[i].microphone_fft.resize(recording_store.size());
       microphones[i].cross_correlation.resize(recording_store.size());
     }
   }
 
-  size_t size() const { return microphone_count; }
-
-  // Fill all microphones with same content for testing.
-  void FillMicrophonesWith(const SampleArray &content) {
-    for (auto &m : microphones) {
-      std::copy(content.begin(), content.end(), m.recording.begin());
-    }
-  }
+  size_t size() const { return microphones.size(); }
 
   void PrepareCrossCorrelations() {
     FFT(recording_store, &all_recording_fft);
@@ -120,23 +118,24 @@ struct MicrophoneContainer {
 
   // Get correlation between microphone "m1" and "m2" at sampling time offset
   real_t getCorrelation(size_t m1, size_t m2, int offset) const {
-    constexpr int kMagicLookupOffset = -1; // unclear, always one left ?
+    constexpr int kMagicLookupOffset = -1; // unclear, why always one left ?
     return microphones[m1]
       .cross_correlation[m2*mic_offset+pad_offset+offset+kMagicLookupOffset]
       .real();
   }
 
-  // Storage of all samples of all microphones back to back,
-  // possibly with padding.
-  int microphone_count;
+  MicrophoneArray microphones;
+
+  // Storage of all samples of all microphones back to back with padding.
   complex_vec_t recording_store;
-  complex_vec_t all_recording_fft;
+  complex_vec_t all_recording_fft;  // FFT of all concatenated mic input
+
+  // Temporary while processing no need to allocate it for everything.
   complex_vec_t reverse_scratch_store;
   complex_vec_t convolution_scratch_store;
-  int mic_offset;
-  int pad_offset;
 
-  MicrophoneArray microphones;
+  const int mic_offset;
+  const int pad_offset;
 };
 
 typedef int64_t tmillis_t;
@@ -201,7 +200,7 @@ static struct SoundSource {
 };
 
 // Add a recording with the given phase shift and wave.
-void add_recording(SampleArray *recording, int sample_frequency_hz,
+void add_recording(MicrophoneRecording *recording, int sample_frequency_hz,
                    real_t phase_shift_seconds,
                    std::function<real_t(real_t t)> wave_f) {
   for (size_t i = 0; i < recording->size(); ++i) {
