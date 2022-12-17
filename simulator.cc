@@ -1,4 +1,5 @@
 
+#include <assert.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/select.h>
@@ -57,23 +58,19 @@ public:
   Point loc;                      // Place of the microphone
   MicrophoneRecording recording;  // samples.
 
+  complex_span_t padded_recording;  // Pointing to recording but padded
   complex_vec_t microphone_fft;     // local microphone fft
-  complex_vec_t cross_correlation;  // cross correlation with all mics
+  complex_vec_t pattern_fft;        // reverse signal fft
+  std::vector<complex_vec_t> correlation_with;
 
   void PreparePatternSampleFFT(complex_vec_t *reverse_scratch) {
+    assert(padded_recording.size() == reverse_scratch->size());
+    FFT(padded_recording, &microphone_fft);
+
     // filling the end with reverse pattern.
     std::copy(recording.rbegin(), recording.rend(),
               reverse_scratch->end() - recording.size());
-    FFT(*reverse_scratch, &microphone_fft);
-  }
-
-  void PrepareCrossCorrelation(const complex_vec_t &all_mic_fft,
-                               complex_vec_t *conv_scratch) {
-    // Convolution with our reversed input fft and the fft of all microphones
-    for (size_t i = 0; i < microphone_fft.size(); ++i) {
-      (*conv_scratch)[i] = all_mic_fft[i] * microphone_fft[i];
-    }
-    InvFFT(*conv_scratch, &cross_correlation);
+    FFT(*reverse_scratch, &pattern_fft);
   }
 
   void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
@@ -83,48 +80,76 @@ typedef std::vector<Microphone> MicrophoneArray;
 struct MicrophoneContainer {
   MicrophoneContainer(const std::vector<Point> &locations, int samples)
     : microphones(locations.size()),
-      // The sampling storage, power of two for FFT convenience
-      recording_store(RoundToNextPowerOf2(microphones.size() * samples * 2)),
+      convolution_width(RoundToNextPowerOf2(samples * 2)),
+      recording_store(microphones.size() * convolution_width),  // bulk store
 
       // other FFT used storage derived from that
-      all_recording_fft(recording_store.size()),
-      reverse_scratch_store(recording_store.size()),
-      convolution_scratch_store(recording_store.size()),
+      reverse_scratch_store(convolution_width),
+      convolution_scratch_store(convolution_width),
 
       // Spacing with enough padding within the input array.
-      mic_offset(recording_store.size() / microphones.size()),
-      pad_offset((mic_offset - samples) / 2) {
+      pad_offset((convolution_width - samples) / 2) {
 
-    fprintf(stderr, "FFT size: %d\n", (int)recording_store.size());
+    fprintf(stderr, "FFT size: %d\n", (int)convolution_width);
     for (size_t i = 0; i < microphones.size(); ++i) {
       microphones[i].loc       = locations[i];
-      microphones[i].recording = std::span(  // choose padded subsections
-        recording_store.begin() + i * mic_offset + pad_offset, samples);
-      microphones[i].microphone_fft.resize(recording_store.size());
-      microphones[i].cross_correlation.resize(recording_store.size());
+      microphones[i].recording = std::span(
+        recording_store.begin() + i * convolution_width + pad_offset,
+        samples);
+      microphones[i].padded_recording = std::span(
+        recording_store.begin() + i * convolution_width,
+        convolution_width);
+      microphones[i].microphone_fft.resize(convolution_width);
+      microphones[i].pattern_fft.resize(convolution_width);
+      // In the following, we actually only need half that as we fill the
+      // triangle. But for convenience we just allocate all but only fill
+      // half.
+      microphones[i].correlation_with.resize(microphones.size());
+      for (size_t j = i+1; j < microphones.size(); ++j) {
+        microphones[i].correlation_with[j].resize(convolution_width);
+      }
     }
   }
 
   size_t size() const { return microphones.size(); }
 
   void PrepareCrossCorrelations() {
-    FFT(recording_store, &all_recording_fft);
-    for (auto &m : microphones) {
+    for (Microphone &m : microphones) {
       m.PreparePatternSampleFFT(&reverse_scratch_store);
-      m.PrepareCrossCorrelation(all_recording_fft,
-                                &convolution_scratch_store);
+    }
+    for (size_t i = 0; i < microphones.size(); ++i) {
+      for (size_t j = i+1; j < microphones.size(); ++j) {
+        Convolute(microphones[i].microphone_fft,
+                  microphones[j].pattern_fft,
+                  &convolution_scratch_store,
+                  &microphones[i].correlation_with[j]);
+      }
     }
   }
 
   // Get correlation between microphone "m1" and "m2" at sampling time offset
   real_t getCorrelation(size_t m1, size_t m2, int offset) const {
     constexpr int kMagicLookupOffset = -1; // unclear, why always one left ?
+    if (m1 > m2) {
+      std::swap(m1, m2);
+      offset = -offset;
+    }
     return microphones[m1]
-      .cross_correlation[m2*mic_offset+pad_offset+offset+kMagicLookupOffset]
+      .correlation_with[m2][pad_offset-offset+kMagicLookupOffset]
       .real();
   }
 
+  void Convolute(const complex_span_t a, const complex_span_t b,
+                 complex_vec_t *convolution_scratch, complex_vec_t *out) {
+    // Convolution with our reversed input fft and the fft of all microphones
+    for (size_t i = 0; i < a.size(); ++i) {
+      (*convolution_scratch)[i] = a[i] * b[i];
+    }
+    InvFFT(*convolution_scratch, out);
+  }
+
   MicrophoneArray microphones;
+  const size_t convolution_width;
 
   // Storage of all samples of all microphones back to back with padding.
   complex_vec_t recording_store;
@@ -134,7 +159,6 @@ struct MicrophoneContainer {
   complex_vec_t reverse_scratch_store;
   complex_vec_t convolution_scratch_store;
 
-  const int mic_offset;
   const int pad_offset;
 };
 
