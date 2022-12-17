@@ -128,15 +128,15 @@ struct MicrophoneContainer {
   }
 
   // Get correlation between microphone "m1" and "m2" at sampling time offset
-  real_t getCorrelation(size_t m1, size_t m2, int offset) const {
+  const std::complex<real_t> &getCorrelation(size_t m1, size_t m2,
+                                             int offset) const {
     constexpr int kMagicLookupOffset = -1; // unclear, why always one left ?
     if (m1 > m2) {
       std::swap(m1, m2);
       offset = -offset;
     }
     return microphones[m1]
-      .correlation_with[m2][pad_offset-offset+kMagicLookupOffset]
-      .real();
+      .correlation_with[m2][pad_offset-offset+kMagicLookupOffset];
   }
 
   void Convolute(const complex_span_t a, const complex_span_t b,
@@ -376,7 +376,7 @@ void ConstructSoundImage(
           const real_t d2 = listen_dir.dotMul(microphones[j].loc - view_origin);
           const real_t td2 = d2 / kSpeedOfSound;
           const int offset = (td2 - td1) * kSampleRateHz;
-          value += sensor.getCorrelation(j, i, offset);
+          value += sensor.getCorrelation(j, i, offset).real();
           if (abs(offset) > max_offset_used)
             max_offset_used = abs(offset);
         }
