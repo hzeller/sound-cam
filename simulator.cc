@@ -345,23 +345,25 @@ void VisualizeBuffer(const Buffer2D<real_t> &frame_buffer,
   }
 }
 
-// Construct sound image. Sweeping a vector 'looking' into a particular
+// Preprocess all the places we need to add up per pixel.
+// Sweeping a vector 'looking' into a particular
 // direction, determining what the expected time difference is for each
-// microphone-pair and adding up the corresponding cross correlations for
+// microphone-pair and remembering the corresponding cross correlations for
 // each pixel.
-void ConstructSoundImage(
-    const Point &view_origin, real_t range, //
-    const MicrophoneContainer &sensor,
-    Buffer2D<real_t> *frame_buffer) {
-
+typedef Buffer2D<std::vector<const Complex*>> preprocess_offsets_t;
+void PreprocessCorrelation(const Point &view_origin, real_t range,
+                           int width, int height,
+                           const MicrophoneContainer &sensor,
+                           preprocess_offsets_t *addition_sites) {
   const MicrophoneArray &microphones = sensor.microphones;
   const int microphone_count = microphones.size();
+  int min_offset_used = 0;
   int max_offset_used = 0;
-  for (int x = 0; x < frame_buffer->width(); ++x) {
-    for (int y = 0; y < frame_buffer->height(); ++y) {
+  for (int x = 0; x < width; ++x) {
+    for (int y = 0; y < height; ++y) {
       // From our place, determine the vector where we're looking at.
-      const real_t xpix = range * x / frame_buffer->width() - range / 2;
-      const real_t ypix = range * y / frame_buffer->height() - range / 2;
+      const real_t xpix = range * x / width - range / 2;
+      const real_t ypix = range * y / height - range / 2;
       Point listen_dir = {xpix, ypix, 1};
       listen_dir.MakeUnitLen();  // normal vector of wavefront plane.
       real_t value = 0;
@@ -376,27 +378,42 @@ void ConstructSoundImage(
           const real_t d2 = listen_dir.dotMul(microphones[j].loc - view_origin);
           const real_t td2 = d2 / kSpeedOfSound;
           const int offset = (td2 - td1) * kSampleRateHz;
-          value += sensor.getCorrelation(j, i, offset).real();
-          if (abs(offset) > max_offset_used)
-            max_offset_used = abs(offset);
+          addition_sites->at(x, y).push_back(&sensor.getCorrelation(j, i, offset));
+          if (offset > max_offset_used)
+            max_offset_used = offset;
+          if (offset < min_offset_used)
+            min_offset_used = offset;
         }
       }
-      // The way angles are calculated from right to left, but our
-      // x going from left to right, we have to mirror it.
-      frame_buffer->at(frame_buffer->width() - x - 1, y) = value;
     }
   }
-#if 0
-  fprintf(stderr, "Maximum cross-correlate output count used: %d\n",
-          max_offset_used);
-
+  fprintf(stderr, "Maximum cross-correlate offset: %d..%d\n",
+          min_offset_used, max_offset_used);
   fprintf(stderr,
           "\n%d mics; %.1f cm view in 1 meter; r=%.1fcm; f₀=%.0f; "
           "λ=%.2f cm; %.3fms max offset\n",
           microphone_count, range * 100, kMicrophoneRadius * 100,
           kTestSourceFrequency, kSpeedOfSound / kTestSourceFrequency * 100,
           max_offset_used * 1000.0 / kSampleRateHz);
-#endif
+}
+
+// Construct sound image. Sweeping a vector 'looking' into a particular
+// direction, determining what the expected time difference is for each
+// microphone-pair and adding up the corresponding cross correlations for
+// each pixel.
+void ConstructSoundImage(const preprocess_offsets_t &offsets,
+                         Buffer2D<real_t> *frame_buffer) {
+  for (int x = 0; x < frame_buffer->width(); ++x) {
+    for (int y = 0; y < frame_buffer->height(); ++y) {
+      real_t value = 0;
+      for (const auto &cross_correlation : offsets.at(x, y)) {
+        value += cross_correlation->real();
+      }
+      // The way angles are calculated from right to left, but our
+      // x going from left to right, we have to mirror it.
+      frame_buffer->at(frame_buffer->width() - x - 1, y) = value;
+    }
+  }
 }
 
 static struct termios orig_term;
@@ -476,6 +493,12 @@ int main(int argc, char *argv[]) {
   TerminalCanvas canvas(frame_buffer.width(), frame_buffer.height());
   canvas.CursorOff(STDOUT_FILENO);
 
+  const real_t range = std::tan(display_range / 2); // max x in one meter
+  preprocess_offsets_t preprocessed_offsets(kScreenSize, kScreenSize);
+  PreprocessCorrelation(optical_camera_pos, range,
+                        frame_buffer.width(), frame_buffer.height(),
+                        sensor, &preprocessed_offsets);
+
   int move_source = 0;
   bool canvas_needs_jump_to_top = false;
   size_t frame_count = 0;
@@ -488,8 +511,7 @@ int main(int argc, char *argv[]) {
     sensor.PrepareCrossCorrelations();
 
     // Now the actual image construction
-    const real_t range = std::tan(display_range / 2); // max x in one meter
-    ConstructSoundImage(optical_camera_pos, range, sensor, &frame_buffer);
+    ConstructSoundImage(preprocessed_offsets, &frame_buffer);
 
     VisualizeBuffer(frame_buffer, &canvas);
     VisualizeSoundSourceLocations(range, move_source, &canvas);
