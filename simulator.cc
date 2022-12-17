@@ -510,6 +510,6 @@ int main(int argc, char *argv[]) {
     }
   }
   const auto duration_ms = GetTimeInMillis() - start_time;
-  fprintf(stderr, "\n%.1ffps\n", 1000.0 * frame_count / duration_ms);
+  fprintf(stderr, "\n%.2ffps\n", 1000.0 * frame_count / duration_ms);
   canvas.CursorOn(STDOUT_FILENO);
 }
