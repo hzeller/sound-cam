@@ -17,7 +17,7 @@ T reverse_bits(T n, short width) {
   return output;
 }
 
-static void FastFourierTransformImpl(const complex_vec_t &in,
+static void FastFourierTransformImpl(complex_span_t in,
                                      complex_vec_t *out,
                                      const bool inverse) {
   const size_t num_samples = in.size();
@@ -89,10 +89,10 @@ static void FastFourierTransformImpl(const complex_vec_t &in,
   }
 }
 
-void InvFFT(const complex_vec_t &in, complex_vec_t *out) {
+void InvFFT(const complex_span_t in, complex_vec_t *out) {
   return FastFourierTransformImpl(in, out, true);
 }
 
-void FFT(const complex_vec_t &in, complex_vec_t *out) {
+void FFT(const complex_span_t in, complex_vec_t *out) {
   return FastFourierTransformImpl(in, out, false);
 }
