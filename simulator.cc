@@ -108,12 +108,19 @@ struct MicrophoneContainer {
 
   size_t size() const { return microphones.size(); }
 
-  void PrepareCrossCorrelations() {
+  void PrepareCrossCorrelations(bool do_printout) {
     FFT(recording_store, &all_recording_fft);
+    bool is_first = true;
     for (auto &m : microphones) {
       m.PreparePatternSampleFFT(&reverse_scratch_store);
       m.PrepareCrossCorrelation(all_recording_fft,
                                 &convolution_scratch_store);
+      if (is_first && do_printout) {
+        PrintArray(stdout, {recording_store,
+                            reverse_scratch_store,
+                            m.cross_correlation});
+      }
+      is_first = false;
     }
   }
 
@@ -151,7 +158,7 @@ static real_t sampling_noise() {
 
   // Additional noise to signal (which is in the range from -1 to 1).
   static std::uniform_real_distribution<> distribution(-1.5, 1.5);
-
+  return 0;
   return distribution(r);
 }
 
@@ -428,21 +435,30 @@ void move_limited(real_t diff, real_t min, real_t max, real_t *target) {
 
 int main(int argc, char *argv[]) {
   bool do_output = true;
+  bool gnuplot_out = false;
   bool read_keyboard = true;
   int frame_limit = -1;
 
   int opt;
-  while ((opt = getopt(argc, argv, "f:")) != -1) {
+  while ((opt = getopt(argc, argv, "f:g")) != -1) {
     switch (opt) {
     case 'f':
       frame_limit = atoi(optarg);
       do_output = false;  // Used to performance test, so no output.
       read_keyboard = false;
       break;
+    case 'g':
+      gnuplot_out = true;
+      break;
     default:
       fprintf(stderr, "Usage: %s [-f <frames>]\n", argv[0]);
       return 0;
     }
+  }
+
+  if (gnuplot_out) {
+    do_output = false;
+    frame_limit = 1;
   }
 
   // After we have the microphone locations, we can create a pre-allocated
@@ -484,7 +500,7 @@ int main(int argc, char *argv[]) {
     if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
     SimulateRecording(&sensor.microphones);
-    sensor.PrepareCrossCorrelations();
+    sensor.PrepareCrossCorrelations(gnuplot_out);
 
     // Now the actual image construction
     ConstructSoundImage(preprocessed_offsets, &frame_buffer);
