@@ -96,3 +96,21 @@ void InvFFT(const complex_span_t in, complex_vec_t *out) {
 void FFT(const complex_span_t in, complex_vec_t *out) {
   return FastFourierTransformImpl(in, out, false);
 }
+
+void PrintArray(FILE *out, const std::initializer_list<complex_span_t> &what) {
+  bool index_used = true;
+  for (size_t i = 0; index_used; ++i) {
+    fprintf(out, "%d ", (int)i);
+    index_used = false;
+    for (const auto &s : what) {
+      if (i >= s.size()) {
+        fprintf(out, " -");
+      }
+      else {
+        index_used = true;
+        fprintf(out, " %.4f", s[i].real());
+      }
+    }
+    fprintf(out, "\n");
+  }
+}
