@@ -158,7 +158,7 @@ static real_t sampling_noise() {
 
   // Additional noise to signal (which is in the range from -1 to 1).
   static std::uniform_real_distribution<> distribution(-1.5, 1.5);
-  return 0;
+
   return distribution(r);
 }
 
