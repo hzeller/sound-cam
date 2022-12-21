@@ -8,7 +8,9 @@
 #include <vector>
 #include <span>
 
-typedef float real_t;
+#include <fftw3.h>
+
+typedef double real_t;
 typedef std::complex<real_t> Complex;
 typedef std::vector<Complex> complex_vec_t;
 typedef std::span<Complex> complex_span_t;
