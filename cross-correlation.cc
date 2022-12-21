@@ -108,7 +108,7 @@ void PrintArray(FILE *out, const std::initializer_list<complex_span_t> &what) {
       }
       else {
         index_used = true;
-        fprintf(out, " %.4f", s[i].real());
+        fprintf(out, " %.4f", real_part(s[i]));
       }
     }
     fprintf(out, "\n");

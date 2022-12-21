@@ -17,7 +17,9 @@ void FFT(const complex_span_t in, complex_vec_t *out);
 void InvFFT(const complex_span_t in, complex_vec_t *out);
 
 // Print a bunch of arrays for gnuplottability. X axis is index, multiple
-// columns with the real() part.
+// columns with the real part.
 void PrintArray(FILE *out, const std::initializer_list<complex_span_t> &what);
+
+inline real_t real_part(const Complex &c) { return c.real(); }
 
 #endif  // CROSS_CORRELATATION_H
