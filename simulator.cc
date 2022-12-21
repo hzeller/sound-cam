@@ -49,6 +49,12 @@ static int RoundToNextPowerOf2(int val) {
   return 1 << (bit_count+1);
 }
 
+struct CorrelationContext {
+  complex_vec_t with;
+  fftw_plan plan;
+  bool plan_ready = false;
+};
+
 class Microphone {
 public:
   Microphone() {}
@@ -61,16 +67,24 @@ public:
   complex_span_t padded_recording;  // Pointing to recording but padded
   complex_vec_t microphone_fft;     // local microphone fft
   complex_vec_t pattern_fft;        // reverse signal fft
-  std::vector<complex_vec_t> correlation_with;
+  std::vector<CorrelationContext> correlation;
+
+  bool plan_ready = false;
+  fftw_plan p1, p2;
 
   void PreparePatternSampleFFT(complex_vec_t *reverse_scratch) {
     assert(padded_recording.size() == reverse_scratch->size());
-    FFT(padded_recording, &microphone_fft);
-
     // filling the end with reverse pattern.
     std::copy(recording.rbegin(), recording.rend(),
-              reverse_scratch->end() - recording.size());
-    FFT(*reverse_scratch, &pattern_fft);
+                reverse_scratch->end() - recording.size());
+
+    if (!plan_ready) {
+      p1 = FFT(padded_recording, &microphone_fft);
+      p2 = FFT(*reverse_scratch, &pattern_fft);
+      plan_ready = true;
+    }
+    fftw_execute(p1);
+    fftw_execute(p2);
   }
 
   void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
@@ -104,9 +118,9 @@ struct MicrophoneContainer {
       // In the following, we actually only need half that as we fill the
       // triangle. But for convenience we just allocate all but only fill
       // half.
-      microphones[i].correlation_with.resize(microphones.size());
+      microphones[i].correlation.resize(microphones.size());
       for (size_t j = i+1; j < microphones.size(); ++j) {
-        microphones[i].correlation_with[j].resize(convolution_width);
+        microphones[i].correlation[j].with.resize(convolution_width);
       }
     }
   }
@@ -122,7 +136,7 @@ struct MicrophoneContainer {
         Convolute(microphones[i].microphone_fft,
                   microphones[j].pattern_fft,
                   &convolution_scratch_store,
-                  &microphones[i].correlation_with[j]);
+                  &microphones[i].correlation[j]);
       }
     }
   }
@@ -135,16 +149,21 @@ struct MicrophoneContainer {
       offset = -offset;
     }
     return microphones[m1]
-      .correlation_with[m2][pad_offset-offset+kMagicLookupOffset];
+      .correlation[m2].with[pad_offset-offset+kMagicLookupOffset];
   }
 
   void Convolute(const complex_span_t a, const complex_span_t b,
-                 complex_vec_t *convolution_scratch, complex_vec_t *out) {
+                 complex_vec_t *convolution_scratch,
+                 CorrelationContext *out) {
     // Convolution with our reversed input fft and the fft of all microphones
     for (size_t i = 0; i < a.size(); ++i) {
       (*convolution_scratch)[i] = a[i] * b[i];
     }
-    InvFFT(*convolution_scratch, out);
+    if (!out->plan_ready) {
+      out->plan = InvFFT(*convolution_scratch, &out->with);
+      out->plan_ready = true;
+    }
+    fftw_execute(out->plan);
   }
 
   MicrophoneArray microphones;

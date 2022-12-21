@@ -15,8 +15,8 @@ typedef std::complex<real_t> Complex;
 typedef std::vector<Complex> complex_vec_t;
 typedef std::span<Complex> complex_span_t;
 
-void FFT(const complex_span_t in, complex_vec_t *out);
-void InvFFT(const complex_span_t in, complex_vec_t *out);
+[[nodiscard]] fftw_plan FFT(const complex_span_t in, complex_vec_t *out);
+[[nodiscard]] fftw_plan InvFFT(const complex_span_t in, complex_vec_t *out);
 
 // Print a bunch of arrays for gnuplottability. X axis is index, multiple
 // columns with the real part.
