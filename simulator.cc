@@ -37,8 +37,7 @@ constexpr size_t kMicrophoneSamples = 1 << 9;
 
 constexpr real_t display_range = tau / 4; // Angle of view. 90 degree.
 
-typedef std::complex<real_t> Complex;
-typedef std::span<Complex> MicrophoneRecording;
+typedef complex_span_t MicrophoneRecording;
 typedef std::function<real_t(real_t t)> WaveExpr;
 
 #define arraysize(a) sizeof(a) / sizeof(a[0])
