@@ -22,6 +22,4 @@ typedef std::span<Complex> complex_span_t;
 // columns with the real part.
 void PrintArray(FILE *out, const std::initializer_list<complex_span_t> &what);
 
-inline real_t real_part(const Complex &c) { return c.real(); }
-
 #endif  // CROSS_CORRELATATION_H

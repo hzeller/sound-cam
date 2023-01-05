@@ -425,7 +425,7 @@ void ConstructSoundImage(const preprocess_offsets_t &offsets,
     for (int y = 0; y < frame_buffer->height(); ++y) {
       real_t value = 0;
       for (const auto &cross_correlation : offsets.at(x, y)) {
-        value += real_part(*cross_correlation);
+        value += cross_correlation->real();
       }
       // The way angles are calculated from right to left, but our
       // x going from left to right, we have to mirror it.
