@@ -7,19 +7,19 @@
 #include <vector>
 
 
-fftw_plan InvFFT(const complex_span_t in, complex_vec_t *out) {
+fftwf_plan InvFFT(const complex_span_t in, complex_vec_t *out) {
   assert(in.size() == out->size());
-  fftw_complex *in_data = (fftw_complex*) in.data();
-  fftw_complex *out_data = (fftw_complex*) out->data();
-  return fftw_plan_dft_1d(in.size(), in_data, out_data,
+  fftwf_complex *in_data = (fftwf_complex*) in.data();
+  fftwf_complex *out_data = (fftwf_complex*) out->data();
+  return fftwf_plan_dft_1d(in.size(), in_data, out_data,
                           FFTW_BACKWARD, FFTW_MEASURE);
 }
 
-fftw_plan FFT(const complex_span_t in, complex_vec_t *out) {
+fftwf_plan FFT(const complex_span_t in, complex_vec_t *out) {
   assert(in.size() == out->size());
-  fftw_complex *in_data = (fftw_complex*) in.data();
-  fftw_complex *out_data = (fftw_complex*) out->data();
-  return fftw_plan_dft_1d(in.size(), in_data, out_data,
+  fftwf_complex *in_data = (fftwf_complex*) in.data();
+  fftwf_complex *out_data = (fftwf_complex*) out->data();
+  return fftwf_plan_dft_1d(in.size(), in_data, out_data,
                           FFTW_FORWARD, FFTW_MEASURE);
 }
 

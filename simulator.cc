@@ -51,7 +51,7 @@ static int RoundToNextPowerOf2(int val) {
 
 struct CorrelationContext {
   complex_vec_t with;
-  fftw_plan plan;
+  fftwf_plan plan;
   bool plan_ready = false;
 };
 
@@ -70,7 +70,7 @@ public:
   std::vector<CorrelationContext> correlation;
 
   bool plan_ready = false;
-  fftw_plan p1, p2;
+  fftwf_plan p1, p2;
 
   void PreparePatternSampleFFT(complex_vec_t *reverse_scratch) {
     assert(padded_recording.size() == reverse_scratch->size());
@@ -83,8 +83,8 @@ public:
       p2 = FFT(*reverse_scratch, &pattern_fft);
       plan_ready = true;
     }
-    fftw_execute(p1);
-    fftw_execute(p2);
+    fftwf_execute(p1);
+    fftwf_execute(p2);
   }
 
   void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
@@ -163,7 +163,7 @@ struct MicrophoneContainer {
       out->plan = InvFFT(*convolution_scratch, &out->with);
       out->plan_ready = true;
     }
-    fftw_execute(out->plan);
+    fftwf_execute(out->plan);
   }
 
   MicrophoneArray microphones;

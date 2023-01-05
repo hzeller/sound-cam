@@ -9,7 +9,7 @@ pkgs.mkShell {
       gnumake
       clang-tools
       clang
-      fftw
+      fftwFloat
       linuxKernel.packages.linux_5_15.perf  # performance tests
 
       # For experiments
