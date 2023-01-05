@@ -9,6 +9,7 @@
 
 fftwf_plan InvFFT(const complex_span_t in, complex_vec_t *out) {
   assert(in.size() == out->size());
+  // fftw_complex and std::complex<> have the same memory layout.
   fftwf_complex *in_data = (fftwf_complex*) in.data();
   fftwf_complex *out_data = (fftwf_complex*) out->data();
   return fftwf_plan_dft_1d(in.size(), in_data, out_data,
