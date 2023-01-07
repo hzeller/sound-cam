@@ -97,7 +97,8 @@ private:
   complex_span_t pair_wise_multplication;  // intermediate
   complex_span_t cross_correlation_output;
 
-  // To refactor: this will come from a global storage at some point.
+  // To refactor: this will come from a global storage at some point to be ready for
+  // plan-many.
   complex_vec_t pair_wise_multplication_backing_store;
   complex_vec_t cross_correlation_output_backing_store;
 
@@ -114,31 +115,17 @@ public:
   MicrophoneRecording recording;  // samples, to be filled from source.
 
   complex_span_t padded_recording;  // samples with padding.
-  complex_span_t microphone_fft;     // local microphone fft
+  complex_span_t microphone_fft;    // local microphone fft
 
-  complex_span_t reverse_signal;  // Rerverse samples are stored at end.
+  complex_span_t reverse_signal;  // Reverse samples are stored at end.
   complex_span_t pattern_fft;     // reverse signal fft
 
-  std::vector<PairCrossCorrelation> correlation;
-
-  // Preparation for later: the backing store will later be allocated
-  // globally
-  complex_vec_t microphone_fft_backing_store;
-  complex_vec_t reverse_signal_backing_store;
-  complex_vec_t pattern_fft_backing_store;
+  std::vector<PairCrossCorrelation> correlation;  // correlation with the i'th other mic
 
   fftwf_plan p1, p2;
 
-  void Initialize() {
-    microphone_fft_backing_store.resize(padded_recording.size());
-    reverse_signal_backing_store.resize(padded_recording.size());
-    pattern_fft_backing_store.resize(padded_recording.size());
-
-    microphone_fft = microphone_fft_backing_store;
-    reverse_signal = reverse_signal_backing_store;
-    pattern_fft = pattern_fft_backing_store;
-
-    // Now that all memory is prepared and fixed, we can create an fft plan
+  void CreatePlan() {
+    // All memory is prepared and fixed, we can create an fft plan
     // TODO: add to a plan multiple thing.
     p1 = FFT(padded_recording, &microphone_fft);
     p2 = FFT(reverse_signal, &pattern_fft);
@@ -167,6 +154,12 @@ struct MicrophoneContainer {
       convolution_width(RoundToNextPowerOf2(samples * 2)),
       recording_store(microphones.size() * convolution_width),  // bulk store
 
+      // Global allocation for intermediate and result data. These need to be
+      // contiguous so that we can use it with the multi-plan fft
+      reverse_store(microphones.size() * convolution_width),
+      microphone_fft_store(microphones.size() * convolution_width),
+      pattern_fft_store(microphones.size() * convolution_width),
+
       // Spacing with enough padding within the input array.
       pad_offset((convolution_width - samples) / 2) {
 
@@ -174,18 +167,26 @@ struct MicrophoneContainer {
     for (size_t i = 0; i < microphones.size(); ++i) {
       microphones[i].loc       = locations[i];
       // We have one big allocation for all microphones, but give each
-      // microphone its own std::span of 'their' data.
+      // microphone its own std::span of 'their' data. Narrower view, as it is only
+      // samples wide, not the full convolution width that contains padding.
       microphones[i].recording = std::span(
         recording_store.begin() + i * convolution_width + pad_offset,
         samples);
       // ... and the span that contains the empty padding around.
       microphones[i].padded_recording = std::span(
-        recording_store.begin() + i * convolution_width,
-        convolution_width);
+        recording_store.begin() + i * convolution_width, convolution_width);
 
-      // All other internal storages of the microphone need to be primed
-      // to store data for the convolution and create the fft plans.
-      microphones[i].Initialize();
+      // All the intermediate data pointing to a global contiguous array.
+      microphones[i].reverse_signal = std::span(
+        reverse_store.begin() + i * convolution_width, convolution_width);
+
+      microphones[i].microphone_fft = std::span(
+        microphone_fft_store.begin() + i * convolution_width, convolution_width);
+
+      microphones[i].pattern_fft = std::span(
+        pattern_fft_store.begin() + i * convolution_width, convolution_width);
+
+      microphones[i].CreatePlan();
     }
 
     // Initialize the pair-wise cross correlations between microphones.
@@ -231,7 +232,9 @@ struct MicrophoneContainer {
 
   // Storage of all samples of all microphones back to back with padding.
   complex_vec_t recording_store;
-  complex_vec_t all_recording_fft;  // FFT of all concatenated mic input
+  complex_vec_t reverse_store;
+  complex_vec_t microphone_fft_store;
+  complex_vec_t pattern_fft_store;
 
   const int pad_offset;
 };
