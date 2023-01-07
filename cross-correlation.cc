@@ -7,7 +7,7 @@
 #include <vector>
 
 
-fftwf_plan InvFFT(const complex_span_t in, complex_vec_t *out) {
+fftwf_plan InvFFT(const complex_span_t in, complex_span_t *out) {
   assert(in.size() == out->size());
   // fftw_complex and std::complex<> have the same memory layout.
   fftwf_complex *in_data = (fftwf_complex*) in.data();
@@ -16,7 +16,7 @@ fftwf_plan InvFFT(const complex_span_t in, complex_vec_t *out) {
                           FFTW_BACKWARD, FFTW_MEASURE);
 }
 
-fftwf_plan FFT(const complex_span_t in, complex_vec_t *out) {
+fftwf_plan FFT(const complex_span_t in, complex_span_t *out) {
   assert(in.size() == out->size());
   fftwf_complex *in_data = (fftwf_complex*) in.data();
   fftwf_complex *out_data = (fftwf_complex*) out->data();

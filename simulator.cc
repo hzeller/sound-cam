@@ -62,8 +62,11 @@ public:
     assert(microphone_fft_in.size() == pattern_fft_in.size());
     microphone_fft = microphone_fft_in;
     pattern_fft    = pattern_fft_in;
-    pair_wise_multplication.resize(microphone_fft.size());
-    cross_correlation_output.resize(microphone_fft.size());
+    pair_wise_multplication_backing_store.resize(microphone_fft.size());
+    cross_correlation_output_backing_store.resize(microphone_fft.size());
+
+    pair_wise_multplication = pair_wise_multplication_backing_store;
+    cross_correlation_output = cross_correlation_output_backing_store;
 
     // Since all memory locations are fixed, we can already create a plan.
     // TODO: add to a plan multiple thing.
@@ -91,8 +94,13 @@ private:
   complex_span_t microphone_fft;
   complex_span_t pattern_fft;
 
-  complex_vec_t pair_wise_multplication;  // intermediate
-  complex_vec_t cross_correlation_output;
+  complex_span_t pair_wise_multplication;  // intermediate
+  complex_span_t cross_correlation_output;
+
+  // To refactor: this will come from a global storage at some point.
+  complex_vec_t pair_wise_multplication_backing_store;
+  complex_vec_t cross_correlation_output_backing_store;
+
   fftwf_plan plan;
 };
 
@@ -106,26 +114,36 @@ public:
   MicrophoneRecording recording;  // samples, to be filled from source.
 
   complex_span_t padded_recording;  // samples with padding.
-  complex_vec_t microphone_fft;     // local microphone fft
+  complex_span_t microphone_fft;     // local microphone fft
 
-  complex_vec_t reverse_signal;  // Rerverse samples are stored at end.
-  complex_vec_t pattern_fft;     // reverse signal fft
+  complex_span_t reverse_signal;  // Rerverse samples are stored at end.
+  complex_span_t pattern_fft;     // reverse signal fft
 
   std::vector<PairCrossCorrelation> correlation;
+
+  // Preparation for later: the backing store will later be allocated
+  // globally
+  complex_vec_t microphone_fft_backing_store;
+  complex_vec_t reverse_signal_backing_store;
+  complex_vec_t pattern_fft_backing_store;
 
   fftwf_plan p1, p2;
 
   void Initialize() {
-    microphone_fft.resize(padded_recording.size());
-    reverse_signal.resize(padded_recording.size());
-    pattern_fft.resize(padded_recording.size());
+    microphone_fft_backing_store.resize(padded_recording.size());
+    reverse_signal_backing_store.resize(padded_recording.size());
+    pattern_fft_backing_store.resize(padded_recording.size());
+
+    microphone_fft = microphone_fft_backing_store;
+    reverse_signal = reverse_signal_backing_store;
+    pattern_fft = pattern_fft_backing_store;
 
     // Now that all memory is prepared and fixed, we can create an fft plan
     // TODO: add to a plan multiple thing.
     p1 = FFT(padded_recording, &microphone_fft);
     p2 = FFT(reverse_signal, &pattern_fft);
   }
-  
+
   void CreateReversePatternData() {
     assert(padded_recording.size() == reverse_signal.size());
     // filling the end with reverse pattern.
@@ -138,7 +156,7 @@ public:
     fftwf_execute(p1);
     fftwf_execute(p2);
   }
-  
+
   void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
 };
 
