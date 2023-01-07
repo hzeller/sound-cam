@@ -570,13 +570,11 @@ int main(int argc, char *argv[]) {
   Buffer2D<real_t> frame_buffer(kScreenSize, kScreenSize);
 
   if (read_keyboard) {
-    printf("\n"
-           "Highlighted source movable     |   K         |"
-           "    m : show microphones\n");
-    printf("1, 2, 3: choose source to move | H   L  Move |"
-           " <ESC>: exit\n");
-    printf("                               |   J         |"
-           "    o : switch output\n");
+    printf(R"(
+  Highlighted source movable     |   K         |    m : show microphones
+  1, 2, 3: choose source to move | H   L  Move | <ESC>: exit
+                                 |   J         |    o : switch output
+)");
     term_raw();
   }
 
