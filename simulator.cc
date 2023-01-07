@@ -593,28 +593,30 @@ int main(int argc, char *argv[]) {
   bool canvas_needs_jump_to_top = false;
   size_t frame_count = 0;
   bool finished = false;
-
+  bool do_image_once = true;
   const auto start_time = GetTimeInMillis();
   while (!finished && frame_limit != 0) {
     if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
-    if (simulate_recording_for_each_image || frame_count == 0)
+    if (do_image_once ||
+        simulate_recording_for_each_image || frame_count == 0) {
       SimulateRecording(&sensor.microphones);
+    }
     sensor.PrepareCrossCorrelations();
 
     // Now the actual image construction
-    if (construct_sound_image) {
+    if (construct_sound_image || do_image_once) {
       ConstructSoundImage(preprocessed_offsets, &frame_buffer);
       VisualizeBuffer(frame_buffer, &canvas);
+      VisualizeSoundSourceLocations(range, move_source, &canvas);
     }
-
-    VisualizeSoundSourceLocations(range, move_source, &canvas);
 
     if (do_output) {
       canvas.Send(STDOUT_FILENO, canvas_needs_jump_to_top);
     }
     canvas_needs_jump_to_top = true;
     ++frame_count;
+    do_image_once = false;
 
     if (read_keyboard) {
         switch (maybe_readchar()) {
@@ -625,18 +627,22 @@ int main(int argc, char *argv[]) {
         case 'h':
         case 'H':
             move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.x);
+            do_image_once = true;
             break;
         case 'j':
         case 'J':
             move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.y);
+            do_image_once = true;
             break;
         case 'l':
         case 'L':
             move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.x);
+            do_image_once = true;
             break;
         case 'k':
         case 'K':
             move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.y);
+            do_image_once = true;
             break;
         case 'm':
             VisualizeMicrophoneLocations(sensor.microphones);
