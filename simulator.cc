@@ -528,20 +528,26 @@ void move_limited(real_t diff, real_t min, real_t max, real_t *target) {
 }
 
 int main(int argc, char *argv[]) {
+  bool construct_sound_image = true;
   bool do_output = true;
   bool read_keyboard = true;
   int frame_limit = -1;
 
   int opt;
-  while ((opt = getopt(argc, argv, "f:")) != -1) {
+  while ((opt = getopt(argc, argv, "f:s")) != -1) {
     switch (opt) {
     case 'f':
       frame_limit = atoi(optarg);
       do_output = false;  // Used to performance test, so no output.
       read_keyboard = false;
       break;
+    case 's':
+      construct_sound_image = false;
+      break;
     default:
-      fprintf(stderr, "Usage: %s [-f <frames>]\n", argv[0]);
+      fprintf(stderr, "Usage: %s [-f <frames>] [-s]\n", argv[0]);
+      fprintf(stderr, " -f <frames>  : perf test: only calculate no output\n");
+      fprintf(stderr, " -s           : Only do FFTs, don't do calc sound\n");
       return 0;
     }
   }
@@ -588,9 +594,11 @@ int main(int argc, char *argv[]) {
     sensor.PrepareCrossCorrelations();
 
     // Now the actual image construction
-    ConstructSoundImage(preprocessed_offsets, &frame_buffer);
+    if (construct_sound_image) {
+      ConstructSoundImage(preprocessed_offsets, &frame_buffer);
+      VisualizeBuffer(frame_buffer, &canvas);
+    }
 
-    VisualizeBuffer(frame_buffer, &canvas);
     VisualizeSoundSourceLocations(range, move_source, &canvas);
 
     if (do_output) {
