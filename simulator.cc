@@ -279,14 +279,14 @@ void AddMicrophoneRandom(std::vector<Point> *mics, int count, real_t radius) {
 
 // Slightly different frequencies for the wave generating functions to be
 // able to distinguish them easily and not creating cross talk.
-real_t wave1(real_t t) { return sin(2 * kTestSourceFrequency * t * tau); };
+real_t wave1(real_t t) { return sinf(2 * kTestSourceFrequency * t * tau); };
 
 static real_t wave2(real_t t) {
-  return sin(2.1637 * kTestSourceFrequency * t * tau);
+  return sinf(2.1637 * kTestSourceFrequency * t * tau);
 }
 
 static real_t wave3(real_t t) {
-  return sin(2.718 * kTestSourceFrequency * t * tau);
+  return sinf(2.718 * kTestSourceFrequency * t * tau);
 }
 
 // Initial placement of sound sources, but read/write as we allow to
@@ -528,13 +528,15 @@ void move_limited(real_t diff, real_t min, real_t max, real_t *target) {
 }
 
 int main(int argc, char *argv[]) {
+  bool simulate_recording_for_each_image = true;
   bool construct_sound_image = true;
   bool do_output = true;
+
   bool read_keyboard = true;
   int frame_limit = -1;
 
   int opt;
-  while ((opt = getopt(argc, argv, "f:s")) != -1) {
+  while ((opt = getopt(argc, argv, "f:sr")) != -1) {
     switch (opt) {
     case 'f':
       frame_limit = atoi(optarg);
@@ -544,10 +546,15 @@ int main(int argc, char *argv[]) {
     case 's':
       construct_sound_image = false;
       break;
+    case 'r':
+      simulate_recording_for_each_image = false;
+      break;
     default:
       fprintf(stderr, "Usage: %s [-f <frames>] [-s]\n", argv[0]);
       fprintf(stderr, " -f <frames>  : perf test: only calculate no output\n");
+      fprintf(stderr, "Reduce other calculations to just focus on FFT\n");
       fprintf(stderr, " -s           : Only do FFTs, don't do calc sound\n");
+      fprintf(stderr, " -r           : Only create simulated recording once\n");
       return 0;
     }
   }
@@ -586,11 +593,13 @@ int main(int argc, char *argv[]) {
   bool canvas_needs_jump_to_top = false;
   size_t frame_count = 0;
   bool finished = false;
+
   const auto start_time = GetTimeInMillis();
   while (!finished && frame_limit != 0) {
     if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
-    SimulateRecording(&sensor.microphones);
+    if (simulate_recording_for_each_image || frame_count == 0)
+      SimulateRecording(&sensor.microphones);
     sensor.PrepareCrossCorrelations();
 
     // Now the actual image construction
