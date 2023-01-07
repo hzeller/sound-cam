@@ -611,7 +611,7 @@ int main(int argc, char *argv[]) {
       VisualizeSoundSourceLocations(range, move_source, &canvas);
     }
 
-    if (do_output) {
+    if (do_output && (construct_sound_image || do_image_once)) {
       canvas.Send(STDOUT_FILENO, canvas_needs_jump_to_top);
     }
     canvas_needs_jump_to_top = true;
