@@ -137,18 +137,20 @@ struct MicrophoneContainer {
   MicrophoneContainer(const std::vector<Point> &locations, int samples)
     : microphones(locations.size()),
       convolution_width(RoundToNextPowerOf2(samples * 2)),
+
+      // Spacing with enough padding within the input array.
+      pad_offset((convolution_width - samples) / 2),
+
       recording_store(microphones.size() * convolution_width),  // bulk store
 
       // Global allocation for intermediate and result data. These need to be
       // contiguous so that we can use it with the multi-plan fft
       reverse_store(microphones.size() * convolution_width),
       microphone_fft_store(microphones.size() * convolution_width),
-      pattern_fft_store(microphones.size() * convolution_width),
+      pattern_fft_store(microphones.size() * convolution_width) {
 
-      // Spacing with enough padding within the input array.
-      pad_offset((convolution_width - samples) / 2) {
-
-    fprintf(stderr, "FFT size: %d\n", (int)convolution_width);
+    fprintf(stderr, "Samples: %d; FFT size: %d; pad-offset: %d\n",
+            samples, (int)convolution_width, pad_offset);
     for (size_t i = 0; i < microphones.size(); ++i) {
       microphones[i].loc       = locations[i];
       // We have one big allocation for all microphones, but give each
@@ -177,8 +179,8 @@ struct MicrophoneContainer {
     // All memory set-up contiguously. Create a many plan for both FFTs
     // Padded Recording fft
     {
-      fftwf_complex *in_data = (fftwf_complex*) &recording_store[0];
-      fftwf_complex *out_data = (fftwf_complex*) &microphone_fft_store[0];
+      fftwf_complex *in_data = (fftwf_complex*) &microphones[0].padded_recording[0];
+      fftwf_complex *out_data = (fftwf_complex*) &microphones[0].microphone_fft[0];
       int n = convolution_width;
       p1 = fftwf_plan_many_dft(1, &n, microphones.size(),
                                in_data, &n, stride, dist,
@@ -192,8 +194,8 @@ struct MicrophoneContainer {
       // That way, we wouldn't have to copy the data into a separate array, but
       // take directly from the end of the padded array (might need to add more
       // whitespace at front). For now: just use the reverse store copy.
-      fftwf_complex *in_data = (fftwf_complex*) &reverse_store[0];
-      fftwf_complex *out_data = (fftwf_complex*) &pattern_fft_store[0];
+      fftwf_complex *in_data = (fftwf_complex*) &microphones[0].reverse_signal[0];
+      fftwf_complex *out_data = (fftwf_complex*) &microphones[0].pattern_fft[0];
       int n = convolution_width;
       p2 = fftwf_plan_many_dft(1, &n, microphones.size(),
                                in_data, &n, stride, dist,
@@ -243,6 +245,7 @@ struct MicrophoneContainer {
 
   MicrophoneArray microphones;
   const size_t convolution_width;
+  const int pad_offset;
 
   // Storage of all samples of all microphones back to back with padding.
   complex_vec_t recording_store;
@@ -251,7 +254,6 @@ struct MicrophoneContainer {
   complex_vec_t pattern_fft_store;
 
   fftwf_plan p1, p2;
-  const int pad_offset;
 };
 
 typedef int64_t tmillis_t;
