@@ -116,9 +116,6 @@ public:
 
   std::vector<PairCrossCorrelation> correlation;  // correlation with the i'th other mic
 
-  void CreatePlan() {
-  }
-
   void CreateReversePatternData() {
     assert(padded_recording.size() == reverse_signal.size());
     // filling the end with reverse pattern.
@@ -172,8 +169,6 @@ struct MicrophoneContainer {
 
       microphones[i].pattern_fft = std::span(
         pattern_fft_store.begin() + i * convolution_width, convolution_width);
-
-      microphones[i].CreatePlan();
     }
 
     // Initialize the pair-wise cross correlations between microphones.
