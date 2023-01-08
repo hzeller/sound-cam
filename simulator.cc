@@ -122,26 +122,11 @@ public:
 
   std::vector<PairCrossCorrelation> correlation;  // correlation with the i'th other mic
 
-  fftwf_plan p1, p2;
-
-  void CreatePlan() {
-    // All memory is prepared and fixed, we can create an fft plan
-    // TODO: add to a plan multiple thing.
-    p1 = FFT(padded_recording, &microphone_fft);
-    p2 = FFT(reverse_signal, &pattern_fft);
-  }
-
   void CreateReversePatternData() {
     assert(padded_recording.size() == reverse_signal.size());
     // filling the end with reverse pattern.
     std::copy(recording.rbegin(), recording.rend(),
               reverse_signal.end() - recording.size());
-  }
-
-  // TODO: this should not be necessary if we have a global plan multiple thing.
-  void ExecuteFFTs() {
-    fftwf_execute(p1);
-    fftwf_execute(p2);
   }
 
   void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
@@ -185,8 +170,35 @@ struct MicrophoneContainer {
 
       microphones[i].pattern_fft = std::span(
         pattern_fft_store.begin() + i * convolution_width, convolution_width);
+    }
 
-      microphones[i].CreatePlan();
+    const int stride = 1;
+    const int dist = convolution_width;
+    // All memory set-up contiguously. Create a many plan for both FFTs
+    // Padded Recording fft
+    {
+      fftwf_complex *in_data = (fftwf_complex*) &recording_store[0];
+      fftwf_complex *out_data = (fftwf_complex*) &microphone_fft_store[0];
+      int n = convolution_width;
+      p1 = fftwf_plan_many_dft(1, &n, microphones.size(),
+                               in_data, &n, stride, dist,
+                               out_data, &n, stride, dist,
+                               FFTW_FORWARD, FFTW_MEASURE);
+    }
+
+    // Reverse pattern FFT
+    {
+      // TODO: maybe we can even do the reverse thing by using a stride of -1 ?
+      // That way, we wouldn't have to copy the data into a separate array, but
+      // take directly from the end of the padded array (might need to add more
+      // whitespace at front). For now: just use the reverse store copy.
+      fftwf_complex *in_data = (fftwf_complex*) &reverse_store[0];
+      fftwf_complex *out_data = (fftwf_complex*) &pattern_fft_store[0];
+      int n = convolution_width;
+      p2 = fftwf_plan_many_dft(1, &n, microphones.size(),
+                               in_data, &n, stride, dist,
+                               out_data, &n, stride, dist,
+                               FFTW_FORWARD, FFTW_MEASURE);
     }
 
     // Initialize the pair-wise cross correlations between microphones.
@@ -207,8 +219,10 @@ struct MicrophoneContainer {
   void PrepareCrossCorrelations() {
     for (Microphone &m : microphones) {
       m.CreateReversePatternData();
-      m.ExecuteFFTs();   // These will eventually be a part of a multi-plan.
     }
+    // Execute plan for all microphone FFT's at once
+    fftwf_execute(p1);  // many-FFT of all padded microphone signals
+    fftwf_execute(p2);  // many-FFT of all reverse microphone signals
     for (size_t i = 0; i < microphones.size(); ++i) {
       for (size_t j = i+1; j < microphones.size(); ++j) {
         microphones[i].correlation[j].ComputeCrossCorrelation();
@@ -236,6 +250,7 @@ struct MicrophoneContainer {
   complex_vec_t microphone_fft_store;
   complex_vec_t pattern_fft_store;
 
+  fftwf_plan p1, p2;
   const int pad_offset;
 };
 
