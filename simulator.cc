@@ -49,6 +49,56 @@ static int RoundToNextPowerOf2(int val) {
   return 1 << (bit_count+1);
 }
 
+// Correlation context for a pair of microphones. It operates on the already
+// fixed set of input ffts to generate the cross correlation.
+class PairCrossCorrelation {
+public:
+  // The 'constructor' (which we can't have as constructor as we initialize
+  // it in a loop).
+  // Params are the already pre-allocated ranges for the microphone
+  // and other microphone fft.
+  void InitializeMicrophonePair(const complex_span_t microphone_fft_in,
+                                const complex_span_t pattern_fft_in) {
+    assert(microphone_fft_in.size() == pattern_fft_in.size());
+    microphone_fft = microphone_fft_in;
+    pattern_fft    = pattern_fft_in;
+    pair_wise_multplication_backing_store.resize(microphone_fft.size());
+    cross_correlation_output_backing_store.resize(microphone_fft.size());
+
+    pair_wise_multplication = pair_wise_multplication_backing_store;
+    cross_correlation_output = cross_correlation_output_backing_store;
+  }
+
+  // Compute cross correlation.
+  // Precondition: both the inputs, microphone fft, and pattern fft are already
+  // computed.
+  void ComputeCrossCorrelation() {
+    for (size_t i = 0; i < microphone_fft.size(); ++i) {
+      pair_wise_multplication[i] = microphone_fft[i] * pattern_fft[i];
+    }
+    InvFFT(pair_wise_multplication, &cross_correlation_output);
+  }
+
+  // Get cross correlation at given index. The reference returned will be
+  // stable, i.e. after a new ComputeCrossCorrelation(), the location pointing
+  // the same index will be the same (Important for the PreprocessSoundImage).
+  //
+  // Precondition for valid data: ComputeCrossCorrelation() has been called.
+  const Complex &at(int index) const { return cross_correlation_output[index]; }
+
+private:
+  complex_span_t microphone_fft;
+  complex_span_t pattern_fft;
+
+  complex_span_t pair_wise_multplication;  // intermediate
+  complex_span_t cross_correlation_output;
+
+  // To refactor: this will come from a global storage at some point to be ready for
+  // plan-many.
+  complex_vec_t pair_wise_multplication_backing_store;
+  complex_vec_t cross_correlation_output_backing_store;
+};
+
 class Microphone {
 public:
   Microphone() {}
@@ -56,21 +106,29 @@ public:
   Microphone(Microphone &&)      = delete;
 
   Point loc;                      // Place of the microphone
-  MicrophoneRecording recording;  // samples.
+  MicrophoneRecording recording;  // samples, to be filled from source.
 
-  complex_span_t padded_recording;  // Pointing to recording but padded
-  complex_vec_t microphone_fft;     // local microphone fft
-  complex_vec_t pattern_fft;        // reverse signal fft
-  std::vector<complex_vec_t> correlation_with;
+  complex_span_t padded_recording;  // samples with padding.
+  complex_span_t microphone_fft;    // local microphone fft
 
-  void PreparePatternSampleFFT(complex_vec_t *reverse_scratch) {
-    assert(padded_recording.size() == reverse_scratch->size());
-    FFT(padded_recording, &microphone_fft);
+  complex_span_t reverse_signal;  // Reverse samples are stored at end.
+  complex_span_t pattern_fft;     // reverse signal fft
 
+  std::vector<PairCrossCorrelation> correlation;  // correlation with the i'th other mic
+
+  void CreatePlan() {
+  }
+
+  void CreateReversePatternData() {
+    assert(padded_recording.size() == reverse_signal.size());
     // filling the end with reverse pattern.
     std::copy(recording.rbegin(), recording.rend(),
-              reverse_scratch->end() - recording.size());
-    FFT(*reverse_scratch, &pattern_fft);
+              reverse_signal.end() - recording.size());
+  }
+
+  void ExecuteFFTs() {
+    FFT(padded_recording, &microphone_fft);
+    FFT(reverse_signal, &pattern_fft);
   }
 
   void ClearSamples() { std::fill(recording.begin(), recording.end(), 0); }
@@ -83,9 +141,11 @@ struct MicrophoneContainer {
       convolution_width(RoundToNextPowerOf2(samples * 2)),
       recording_store(microphones.size() * convolution_width),  // bulk store
 
-      // other FFT used storage derived from that
-      reverse_scratch_store(convolution_width),
-      convolution_scratch_store(convolution_width),
+      // Global allocation for intermediate and result data. These need to be
+      // contiguous so that we can use it with the multi-plan fft
+      reverse_store(microphones.size() * convolution_width),
+      microphone_fft_store(microphones.size() * convolution_width),
+      pattern_fft_store(microphones.size() * convolution_width),
 
       // Spacing with enough padding within the input array.
       pad_offset((convolution_width - samples) / 2) {
@@ -93,36 +153,52 @@ struct MicrophoneContainer {
     fprintf(stderr, "FFT size: %d\n", (int)convolution_width);
     for (size_t i = 0; i < microphones.size(); ++i) {
       microphones[i].loc       = locations[i];
+      // We have one big allocation for all microphones, but give each
+      // microphone its own std::span of 'their' data. Narrower view, as it is only
+      // samples wide, not the full convolution width that contains padding.
       microphones[i].recording = std::span(
         recording_store.begin() + i * convolution_width + pad_offset,
         samples);
+      // ... and the span that contains the empty padding around.
       microphones[i].padded_recording = std::span(
-        recording_store.begin() + i * convolution_width,
-        convolution_width);
-      microphones[i].microphone_fft.resize(convolution_width);
-      microphones[i].pattern_fft.resize(convolution_width);
+        recording_store.begin() + i * convolution_width, convolution_width);
+
+      // All the intermediate data pointing to a global contiguous array.
+      microphones[i].reverse_signal = std::span(
+        reverse_store.begin() + i * convolution_width, convolution_width);
+
+      microphones[i].microphone_fft = std::span(
+        microphone_fft_store.begin() + i * convolution_width, convolution_width);
+
+      microphones[i].pattern_fft = std::span(
+        pattern_fft_store.begin() + i * convolution_width, convolution_width);
+
+      microphones[i].CreatePlan();
+    }
+
+    // Initialize the pair-wise cross correlations between microphones.
+    for (size_t i = 0; i < microphones.size(); ++i) {
       // In the following, we actually only need half that as we fill the
       // triangle. But for convenience we just allocate all but only fill
       // half.
-      microphones[i].correlation_with.resize(microphones.size());
-      for (size_t j = i+1; j < microphones.size(); ++j) {
-        microphones[i].correlation_with[j].resize(convolution_width);
+      microphones[i].correlation.resize(microphones.size());
+      for (size_t j = i + 1; j < microphones.size(); ++j) {
+        microphones[i].correlation[j].InitializeMicrophonePair(
+          microphones[i].microphone_fft, microphones[j].pattern_fft);
       }
     }
   }
 
-  size_t size() const { return microphones.size(); }
+  int microphone_count() const { return microphones.size(); }
 
   void PrepareCrossCorrelations() {
     for (Microphone &m : microphones) {
-      m.PreparePatternSampleFFT(&reverse_scratch_store);
+      m.CreateReversePatternData();
+      m.ExecuteFFTs();   // These will eventually be a part of a multi-plan.
     }
     for (size_t i = 0; i < microphones.size(); ++i) {
       for (size_t j = i+1; j < microphones.size(); ++j) {
-        Convolute(microphones[i].microphone_fft,
-                  microphones[j].pattern_fft,
-                  &convolution_scratch_store,
-                  &microphones[i].correlation_with[j]);
+        microphones[i].correlation[j].ComputeCrossCorrelation();
       }
     }
   }
@@ -135,16 +211,7 @@ struct MicrophoneContainer {
       offset = -offset;
     }
     return microphones[m1]
-      .correlation_with[m2][pad_offset-offset+kMagicLookupOffset];
-  }
-
-  void Convolute(const complex_span_t a, const complex_span_t b,
-                 complex_vec_t *convolution_scratch, complex_vec_t *out) {
-    // Convolution with our reversed input fft and the fft of all microphones
-    for (size_t i = 0; i < a.size(); ++i) {
-      (*convolution_scratch)[i] = a[i] * b[i];
-    }
-    InvFFT(*convolution_scratch, out);
+      .correlation[m2].at(pad_offset-offset+kMagicLookupOffset);
   }
 
   MicrophoneArray microphones;
@@ -152,11 +219,9 @@ struct MicrophoneContainer {
 
   // Storage of all samples of all microphones back to back with padding.
   complex_vec_t recording_store;
-  complex_vec_t all_recording_fft;  // FFT of all concatenated mic input
-
-  // Temporary while processing no need to allocate it for everything.
-  complex_vec_t reverse_scratch_store;
-  complex_vec_t convolution_scratch_store;
+  complex_vec_t reverse_store;
+  complex_vec_t microphone_fft_store;
+  complex_vec_t pattern_fft_store;
 
   const int pad_offset;
 };
@@ -201,14 +266,14 @@ void AddMicrophoneRandom(std::vector<Point> *mics, int count, real_t radius) {
 
 // Slightly different frequencies for the wave generating functions to be
 // able to distinguish them easily and not creating cross talk.
-real_t wave1(real_t t) { return sin(2 * kTestSourceFrequency * t * tau); };
+real_t wave1(real_t t) { return sinf(2 * kTestSourceFrequency * t * tau); };
 
 static real_t wave2(real_t t) {
-  return sin(2.1637 * kTestSourceFrequency * t * tau);
+  return sinf(2.1637 * kTestSourceFrequency * t * tau);
 }
 
 static real_t wave3(real_t t) {
-  return sin(2.718 * kTestSourceFrequency * t * tau);
+  return sinf(2.718 * kTestSourceFrequency * t * tau);
 }
 
 // Initial placement of sound sources, but read/write as we allow to
@@ -350,10 +415,10 @@ void VisualizeBuffer(const Buffer2D<real_t> &frame_buffer,
 // microphone-pair and remembering the corresponding cross correlations for
 // each pixel.
 typedef Buffer2D<std::vector<const Complex*>> preprocess_offsets_t;
-void PreprocessCorrelation(const Point &view_origin, real_t range,
-                           int width, int height,
-                           const MicrophoneContainer &sensor,
-                           preprocess_offsets_t *addition_sites) {
+void PreprocessSoundImage(const Point &view_origin, real_t range,
+                          int width, int height,
+                          const MicrophoneContainer &sensor,
+                          preprocess_offsets_t *addition_sites) {
   const MicrophoneArray &microphones = sensor.microphones;
   const int microphone_count = microphones.size();
   int min_offset_used = 0;
@@ -450,20 +515,33 @@ void move_limited(real_t diff, real_t min, real_t max, real_t *target) {
 }
 
 int main(int argc, char *argv[]) {
+  bool simulate_recording_for_each_image = true;
+  bool construct_sound_image = true;
   bool do_output = true;
+
   bool read_keyboard = true;
   int frame_limit = -1;
 
   int opt;
-  while ((opt = getopt(argc, argv, "f:")) != -1) {
+  while ((opt = getopt(argc, argv, "f:sr")) != -1) {
     switch (opt) {
     case 'f':
       frame_limit = atoi(optarg);
       do_output = false;  // Used to performance test, so no output.
       read_keyboard = false;
       break;
+    case 's':
+      construct_sound_image = false;
+      break;
+    case 'r':
+      simulate_recording_for_each_image = false;
+      break;
     default:
-      fprintf(stderr, "Usage: %s [-f <frames>]\n", argv[0]);
+      fprintf(stderr, "Usage: %s [-f <frames>] [-s]\n", argv[0]);
+      fprintf(stderr, " -f <frames>  : perf test: only calculate no output\n");
+      fprintf(stderr, "Reduce other calculations to just focus on FFT\n");
+      fprintf(stderr, " -s           : Only do FFTs, don't do calc sound\n");
+      fprintf(stderr, " -r           : Only create simulated recording once\n");
       return 0;
     }
   }
@@ -474,18 +552,16 @@ int main(int argc, char *argv[]) {
   MicrophoneContainer sensor(CreateMicrophoneLocations(kMicrophoneCount),
                              kMicrophoneSamples);
 
-  fprintf(stderr, "Got %d microphones\n", (int)sensor.size());
+  fprintf(stderr, "Got %d microphones\n", sensor.microphone_count());
 
   Buffer2D<real_t> frame_buffer(kScreenSize, kScreenSize);
 
   if (read_keyboard) {
-    printf("\n"
-           "Highlighted source movable     |   K         |"
-           "    m : show microphones\n");
-    printf("1, 2, 3: choose source to move | H   L  Move |"
-           " <ESC>: exit\n");
-    printf("                               |   J         |"
-           "    o : switch output\n");
+    printf(R"(
+  Highlighted source movable     |   K         |    m : show microphones
+  1, 2, 3: choose source to move | H   L  Move | <ESC>: exit
+                                 |   J         |    o : switch output
+)");
     term_raw();
   }
 
@@ -494,32 +570,38 @@ int main(int argc, char *argv[]) {
 
   const real_t range = std::tan(display_range / 2); // max x in one meter
   preprocess_offsets_t preprocessed_offsets(kScreenSize, kScreenSize);
-  PreprocessCorrelation(optical_camera_pos, range,
-                        frame_buffer.width(), frame_buffer.height(),
-                        sensor, &preprocessed_offsets);
+  PreprocessSoundImage(optical_camera_pos, range,
+                       frame_buffer.width(), frame_buffer.height(),
+                       sensor, &preprocessed_offsets);
 
   int move_source = 0;
   bool canvas_needs_jump_to_top = false;
   size_t frame_count = 0;
   bool finished = false;
+  bool do_image_once = true;
   const auto start_time = GetTimeInMillis();
   while (!finished && frame_limit != 0) {
     if (frame_limit > 0) --frame_limit;
     // Simulate recording, including noise.
-    SimulateRecording(&sensor.microphones);
+    if (do_image_once ||
+        simulate_recording_for_each_image || frame_count == 0) {
+      SimulateRecording(&sensor.microphones);
+    }
     sensor.PrepareCrossCorrelations();
 
     // Now the actual image construction
-    ConstructSoundImage(preprocessed_offsets, &frame_buffer);
+    if (construct_sound_image || do_image_once) {
+      ConstructSoundImage(preprocessed_offsets, &frame_buffer);
+      VisualizeBuffer(frame_buffer, &canvas);
+      VisualizeSoundSourceLocations(range, move_source, &canvas);
+    }
 
-    VisualizeBuffer(frame_buffer, &canvas);
-    VisualizeSoundSourceLocations(range, move_source, &canvas);
-
-    if (do_output) {
+    if (do_output && (construct_sound_image || do_image_once)) {
       canvas.Send(STDOUT_FILENO, canvas_needs_jump_to_top);
     }
     canvas_needs_jump_to_top = true;
     ++frame_count;
+    do_image_once = false;
 
     if (read_keyboard) {
         switch (maybe_readchar()) {
@@ -530,18 +612,22 @@ int main(int argc, char *argv[]) {
         case 'h':
         case 'H':
             move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.x);
+            do_image_once = true;
             break;
         case 'j':
         case 'J':
             move_limited(-0.1, -1, 1, &sound_sources[move_source].loc.y);
+            do_image_once = true;
             break;
         case 'l':
         case 'L':
             move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.x);
+            do_image_once = true;
             break;
         case 'k':
         case 'K':
             move_limited(+0.1, -1, 1, &sound_sources[move_source].loc.y);
+            do_image_once = true;
             break;
         case 'm':
             VisualizeMicrophoneLocations(sensor.microphones);
