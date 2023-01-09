@@ -415,11 +415,9 @@ void VisualizeBuffer(const Buffer2D<real_t> &frame_buffer,
       int color_index =
           (int)((colormap_entries - 1) * (v - smallest) / (biggest - smallest));
       if (color_index < 0) {
-        fprintf(stderr, "%d\n", color_index);
         color_index = 0;
       }
       if (color_index > 255) {
-        fprintf(stderr, "%d\n", color_index);
         color_index = 255;
       }
       const RGBCol &color = kColorMap[color_index];
@@ -484,6 +482,13 @@ void PreprocessSoundImage(const Point &view_origin, real_t range,
 // direction, determining what the expected time difference is for each
 // microphone-pair and adding up the corresponding cross correlations for
 // each pixel.
+// TODO: Even though we have pre-determined all the values that need to be
+//  added for a particular pixel (pointing to places inside the cross
+//  correlation array), this is now the slowest part for the whole image
+//  generation. We need to add up (microphone * (microphone-1)/2) values for
+//  each of the pixels. This is less than 1M additions so should be quick,
+//  but we're gathering everything via pointers from all over the place.
+//  Maybe this can be done better in a clever folding operation
 void ConstructSoundImage(const preprocess_offsets_t &offsets,
                          Buffer2D<real_t> *frame_buffer) {
   for (int x = 0; x < frame_buffer->width(); ++x) {
