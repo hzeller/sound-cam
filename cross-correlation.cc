@@ -16,6 +16,14 @@ fftwf_plan InvFFT(const complex_span_t in, complex_span_t *out) {
                           FFTW_BACKWARD, FFTW_MEASURE);
 }
 
+fftwf_plan InvFFTReal(const complex_span_t in, real_span_t *out) {
+  assert(in.size() == out->size());
+  // fftw_complex and std::complex<> have the same memory layout.
+  fftwf_complex *in_data = (fftwf_complex*) in.data();
+  real_t *out_data = (real_t*) out->data();
+  return fftwf_plan_dft_c2r_1d(in.size(), in_data, out_data, FFTW_MEASURE);
+}
+
 fftwf_plan FFT(const complex_span_t in, complex_span_t *out) {
   assert(in.size() == out->size());
   fftwf_complex *in_data = (fftwf_complex*) in.data();
