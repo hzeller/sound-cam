@@ -70,7 +70,7 @@ public:
 
     // Since all memory locations are fixed, we can already create a plan.
     // TODO: add to a plan multiple thing.
-    plan = InvFFT(pair_wise_multplication, &cross_correlation_output);
+    plan = InvFFTReal(pair_wise_multplication, &cross_correlation_output);
   }
 
   // Compute cross correlation.
@@ -88,19 +88,19 @@ public:
   // the same index will be the same (Important for the PreprocessSoundImage).
   //
   // Precondition for valid data: ComputeCrossCorrelation() has been called.
-  const Complex &at(int index) const { return cross_correlation_output[index]; }
+  const real_t &at(int index) const { return cross_correlation_output[index]; }
 
 private:
   complex_span_t microphone_fft;
   complex_span_t pattern_fft;
 
   complex_span_t pair_wise_multplication;  // intermediate
-  complex_span_t cross_correlation_output;
+  real_span_t cross_correlation_output;
 
   // To refactor: this will come from a global storage at some point to be ready for
   // plan-many.
   complex_vec_t pair_wise_multplication_backing_store;
-  complex_vec_t cross_correlation_output_backing_store;
+  real_vec_t cross_correlation_output_backing_store;
 
   fftwf_plan plan;
 };
@@ -222,7 +222,7 @@ struct MicrophoneContainer {
   }
 
   // Get correlation between microphone "m1" and "m2" at sampling time offset
-  const Complex &getCorrelation(size_t m1, size_t m2, int offset) const {
+  const real_t &getCorrelation(size_t m1, size_t m2, int offset) const {
     constexpr int kMagicLookupOffset = -1; // unclear, why always one left ?
     if (m1 > m2) {
       std::swap(m1, m2);
@@ -433,7 +433,7 @@ void VisualizeBuffer(const Buffer2D<real_t> &frame_buffer,
 // direction, determining what the expected time difference is for each
 // microphone-pair and remembering the corresponding cross correlations for
 // each pixel.
-typedef Buffer2D<std::vector<const Complex*>> preprocess_offsets_t;
+typedef Buffer2D<std::vector<const real_t*>> preprocess_offsets_t;
 void PreprocessSoundImage(const Point &view_origin, real_t range,
                           int width, int height,
                           const MicrophoneContainer &sensor,
@@ -490,7 +490,7 @@ void ConstructSoundImage(const preprocess_offsets_t &offsets,
     for (int y = 0; y < frame_buffer->height(); ++y) {
       real_t value = 0;
       for (const auto &cross_correlation : offsets.at(x, y)) {
-        value += cross_correlation->real();
+        value += *cross_correlation;
       }
       // The way angles are calculated from right to left, but our
       // x going from left to right, we have to mirror it.
