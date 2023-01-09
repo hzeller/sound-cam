@@ -1,4 +1,4 @@
-CFLAGS=-O3 -g -W -Wall -Wextra -ffast-math
+CFLAGS=-O3 -g -W -Wall -Wextra -ffast-math -DNDEBUG
 CXXFLAGS=$(CFLAGS) -Wno-unused -std=c++20
 
 simulator: simulator.o cross-correlation.o terminal-canvas.o
