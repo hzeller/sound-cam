@@ -592,7 +592,7 @@ int main(int argc, char *argv[]) {
   Buffer2D<real_t> frame_buffer(kScreenSize, kScreenSize);
 
   if (read_keyboard) {
-    printf(R"(
+    fprintf(stderr, R"(
   Highlighted source movable     |   K         |    m : show microphones
   1, 2, 3: choose source to move | H   L  Move | <ESC>: exit
                                  |   J         |    o : switch output
@@ -608,6 +608,19 @@ int main(int argc, char *argv[]) {
   PreprocessSoundImage(optical_camera_pos, range,
                        frame_buffer.width(), frame_buffer.height(),
                        sensor, &preprocessed_offsets);
+
+#if 0
+  // For each pixel, see which contributions (pointers to values to be added
+  // to it) are in there.
+  int pixel = 0;
+  for (const auto &sums : preprocessed_offsets) {
+    ++pixel;
+    for (const auto &value : sums) {
+      printf("%d %p\n", pixel, value);
+    }
+  }
+  return 0;
+#endif
 
   int move_source = 0;
   bool canvas_needs_jump_to_top = false;
