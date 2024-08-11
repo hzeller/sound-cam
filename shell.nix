@@ -10,7 +10,7 @@ pkgs.mkShell {
       clang-tools
       clang
       fftwFloat
-      linuxKernel.packages.linux_5_15.perf  # performance tests
+      linuxKernel.packages.linux_6_6.perf  # performance tests
 
       # For experiments
       gnuplot
