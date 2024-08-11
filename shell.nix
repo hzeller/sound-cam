@@ -10,6 +10,6 @@ pkgs.mkShell {
       clang-tools
       clang
       alglib
-      linuxKernel.packages.linux_5_15.perf  # performance tests
+      linuxKernel.packages.linux_6_6.perf  # performance tests
     ];
 }
