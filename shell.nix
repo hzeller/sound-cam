@@ -9,7 +9,7 @@ pkgs.mkShell {
       gnumake
       clang-tools
       clang
-      linuxKernel.packages.linux_6_6.perf  # performance tests
+      perf  # performance tests
 
       # For experiments
       gnuplot
